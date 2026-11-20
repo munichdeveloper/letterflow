@@ -38,7 +38,9 @@ execution:
   # A failed validation or a merge review that asks for changes starts a further attempt within maxRetries (software-factory#143).
   rework: true
 llm:
-  provider: static
+  # Johannes 2026-11-20 (SF #203): Jev decides start order and start readiness (ready / unclear / too-large) with the
+  # router settings below; every router skip plans like static.
+  provider: jev
   model: gpt-4.1-mini
   reasoningEffort: null
   maxOutputTokens: 4000
@@ -102,7 +104,7 @@ merge:
   maxReviewsPerRun: 1
   maxActionsPerRun: 1
   review:
-    provider: openai # keeps the independent OpenAI review while planning is deterministic (llm.provider mock)
+    provider: openai # independent OpenAI review, separate from the Jev planner
     model: gpt-6.1-sol
     reasoningEffort: high
     timeoutSeconds: 120
