@@ -36,7 +36,10 @@ export default async function LeadPage({ params }: { params: Promise<{ key: stri
         <p className="bad">Für diese Kampagne fehlt die Interessenabwägung. <Link href={`/campaigns/${key}/edit`}>Eintragen</Link>, sonst lässt die Datenbank keine Brieffreigabe zu.</p>
       )}
       {stage === "letter" && (
-        <p className="muted">Das PDF selbst liegt noch in dsb-new (Ansicht kommt mit letterflow#3). Freigegeben wird genau das PDF mit dem Hash {lead.letter_pdf_sha256?.slice(0, 12)}…</p>
+        <p className="muted">
+          <a href={`/campaigns/${key}/leads/${encodeURIComponent(lead.domain)}/letter.pdf`} target="_blank" rel="noreferrer noopener">Brief-PDF ansehen</a>
+          {" "}· Freigegeben wird genau das PDF mit dem Hash {lead.letter_pdf_sha256?.slice(0, 12)}…
+        </p>
       )}
 
       <LeadDecision
