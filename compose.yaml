@@ -1,0 +1,33 @@
+# Produktion auf dem Hostinger-VPS (srv2127002), gleiches Muster wie Business OS: Traefik (traefik-u55z) liest die
+# Labels und holt ein Let's-Encrypt-Zertifikat. Kein Host-Port, damit nichts mit anderen Projekten kollidiert.
+# Konfiguration bleibt auf dem Host in /docker/letterflow/.env (Variablen siehe .env.example), LETTERFLOW_HOST optional.
+name: letterflow
+services:
+  app:
+    image: letterflow:${SF_RELEASE_SHA:-local}
+    build:
+      context: .
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp, /app/.next/cache]
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+    env_file: .env
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/login').then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.letterflow.rule: Host(`${LETTERFLOW_HOST:-letterflow.srv2127002.hstgr.cloud}`)
+      traefik.http.routers.letterflow.entrypoints: websecure
+      traefik.http.routers.letterflow.tls: 'true'
+      traefik.http.routers.letterflow.tls.certresolver: letsencrypt
+      traefik.http.services.letterflow.loadbalancer.server.port: '3000'

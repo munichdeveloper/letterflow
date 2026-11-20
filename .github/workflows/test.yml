@@ -18,3 +18,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t letterflow:ci .
+      - name: Container startet und antwortet
+        run: |
+          docker run -d --name lf --read-only --tmpfs /tmp --tmpfs /app/.next/cache \
+            -e LETTERFLOW_SESSION_SECRET=ci-secret-ci-secret-ci-secret-ci-secret -p 3000:3000 letterflow:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/login >/dev/null && exit 0; sleep 1; done
+          docker logs lf; exit 1

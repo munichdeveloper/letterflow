@@ -16,4 +16,4 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next
 USER node
 EXPOSE 3000
-CMD ["npx", "next", "start"]
+CMD ["node", "node_modules/next/dist/bin/next", "start"]
