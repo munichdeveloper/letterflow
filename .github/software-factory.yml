@@ -1,8 +1,10 @@
 version: 1
 factory:
   enabled: true # also gates deploy: the deploy plan reports "disabled" otherwise
-  scope: "Coordinate explicitly managed repository tasks; run the non-mutating
-    test worker."
+  scope: "Implement explicitly SF-managed tasks for letterflow (Next.js app for
+    B2B postal acquisition). Independently review and conditionally merge
+    Factory PRs and PRs explicitly enrolled with sf:automerge. Respect
+    CLAUDE.md (public repo: no real lead data, no secrets)."
 manager:
   workflow: factory-manager.yml
   maxActions: 10
@@ -15,12 +17,16 @@ manager:
 autonomy:
   profile: autonomous
   overrides:
-    {
-      merge_pr: deny,
-      close_issue: deny,
-      create_followup: deny,
-      expand_scope: deny
-    }
+    transition: allow
+    close_issue: allow
+    create_followup: allow
+    prioritize: allow
+    approve_task: allow
+    start_worker: allow
+    retry_worker: allow
+    cancel_worker: allow
+    expand_scope: deny
+    merge_pr: allow # Mandatory independent AI review and the required checks still apply.
 execution:
   dryRun: false
   maxParallelWorkers: 1
@@ -29,6 +35,8 @@ execution:
   workerTimeoutMinutes: 30
   dispatchGraceMinutes: 10
   engine: temporal
+  # A failed validation or a merge review that asks for changes starts a further attempt within maxRetries (software-factory#143).
+  rework: true
 llm:
   provider: mock
   model: gpt-4.1-mini
@@ -63,31 +71,38 @@ reporting:
 # Optional Slack bot connection is supplied through the SLACK_BOT_TOKEN Actions secret.
 notifications:
   slack:
-    enabled: false
-    channel: null
+    enabled: true
+    channel: C0CGJKK3EKS # ki-notification
     maxPerRun: 20
-    since: null
+    since: '2026-11-20T14:30:00Z' # Do not backfill earlier actions.
     events:
+      grant_required:
+        # A task waits for nothing but a person's harness:ready (software-factory#127).
+        enabled: true
+        channel: null
       issue_created:
-        enabled: false
+        enabled: true
         channel: null
       pr_merged:
-        enabled: false
+        enabled: true
         channel: null
         actors: [] # Always Bot accounts only; optional narrower login allow-list.
 
 # Optional independent AI merge reviewer; green CI alone never authorizes merging.
 merge:
-  enabled: false
+  enabled: true
   includeFactoryPRs: true
   adoptLabel: sf:automerge
   method: squash
   updateBranch: true
+  # No branch ruleset on this repository: the Factory itself requires the checks on the exact, up-to-date head.
+  protection: factory
   requiredChecks: [ test, docker ]
   validationWorkflow: test.yml
-  maxReviewsPerRun: 2
+  maxReviewsPerRun: 1
   maxActionsPerRun: 1
   review:
+    provider: openai # keeps the independent OpenAI review while planning is deterministic (llm.provider mock)
     model: gpt-6.1-sol
     reasoningEffort: high
     timeoutSeconds: 120
@@ -95,6 +110,13 @@ merge:
     maxFiles: 60
     maxContextBytes: 250000
   postMergeWorkflows: []
+  # Risk-based auto-merge like Controla and geschaeftsideen-web: up to medium risk on its own, above that a person approves.
+  risk:
+    enabled: true
+    mode: enforce
+    autoMergeUpTo: medium
+    assessor:
+      provider: openai
 
 # Optional deployment of the default branch (docker-ssh: Docker Compose on a host via SSH).
 # Secrets: DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS and, unless set below, DEPLOY_HOST/DEPLOY_USER.
@@ -197,3 +219,97 @@ router:
         reasoningEffort: high
         description: "Mostly mechanical but wide changes, refactorings and renames
           across many files."
+  review:
+    candidates:
+      - id: haiku-low
+        provider: claude
+        model: claude-haiku-5-5
+        reasoningEffort: low
+        description: "Tiny pull requests: texts, docs, config values, one-line fixes."
+      - id: haiku-medium
+        provider: claude
+        model: claude-haiku-5-5
+        reasoningEffort: medium
+        description: "Small pull requests with one clear purpose in one or two files."
+      - id: haiku-high
+        provider: claude
+        model: claude-haiku-5-5
+        reasoningEffort: high
+        description: "Small pull requests where a mistake would still be easy to spot."
+      - id: sonnet-low
+        provider: claude
+        model: claude-sonnet-5-5
+        reasoningEffort: low
+        description: "Routine pull requests of a few files with low behavioural impact."
+      - id: sonnet-medium
+        provider: claude
+        model: claude-sonnet-5-5
+        reasoningEffort: medium
+        description: "Small to medium pull requests with few files and a clear purpose."
+      - id: sonnet-high
+        provider: claude
+        model: claude-sonnet-5-5
+        reasoningEffort: high
+        description: "Medium pull requests that change behaviour in several files."
+      - id: opus-low
+        provider: claude
+        model: claude-opus-5-5
+        reasoningEffort: low
+        description: "Large but mechanical pull requests, e.g. renames across many files."
+      - id: opus-medium
+        provider: claude
+        model: claude-opus-5-5
+        reasoningEffort: medium
+        description: "Large pull requests or ones touching shared modules."
+      - id: opus-high
+        provider: claude
+        model: claude-opus-5-5
+        reasoningEffort: high
+        description: "Security, authentication, payments, data migrations, deployment or concurrency changes."
+  risk:
+    candidates:
+      - id: haiku-low
+        provider: claude
+        model: claude-haiku-5-5
+        reasoningEffort: low
+        description: "Tiny pull requests: texts, docs, config values, one-line fixes."
+      - id: haiku-medium
+        provider: claude
+        model: claude-haiku-5-5
+        reasoningEffort: medium
+        description: "Small pull requests with one clear purpose in one or two files."
+      - id: haiku-high
+        provider: claude
+        model: claude-haiku-5-5
+        reasoningEffort: high
+        description: "Small pull requests where a mistake would still be easy to spot."
+      - id: sonnet-low
+        provider: claude
+        model: claude-sonnet-5-5
+        reasoningEffort: low
+        description: "Routine pull requests of a few files with low behavioural impact."
+      - id: sonnet-medium
+        provider: claude
+        model: claude-sonnet-5-5
+        reasoningEffort: medium
+        description: "Small to medium pull requests with few files and a clear purpose."
+      - id: sonnet-high
+        provider: claude
+        model: claude-sonnet-5-5
+        reasoningEffort: high
+        description: "Medium pull requests that change behaviour in several files."
+      - id: opus-low
+        provider: claude
+        model: claude-opus-5-5
+        reasoningEffort: low
+        description: "Large but mechanical pull requests, e.g. renames across many files."
+      - id: opus-medium
+        provider: claude
+        model: claude-opus-5-5
+        reasoningEffort: medium
+        description: "Large pull requests or ones touching shared modules."
+      - id: opus-high
+        provider: claude
+        model: claude-opus-5-5
+        reasoningEffort: high
+        description: "Security, authentication, payments, data migrations, deployment or concurrency changes."
