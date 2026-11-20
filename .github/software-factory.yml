@@ -3,8 +3,8 @@ factory:
   enabled: true # also gates deploy: the deploy plan reports "disabled" otherwise
   scope: "Implement explicitly SF-managed tasks for letterflow (Next.js app for
     B2B postal acquisition). Independently review and conditionally merge
-    Factory PRs and PRs explicitly enrolled with sf:automerge. Respect
-    CLAUDE.md (public repo: no real lead data, no secrets)."
+    Factory PRs and PRs explicitly enrolled with sf:automerge. Respect CLAUDE.md
+    (public repo: no real lead data, no secrets)."
 manager:
   workflow: factory-manager.yml
   maxActions: 10
@@ -265,7 +265,8 @@ router:
         provider: claude
         model: claude-opus-5-5
         reasoningEffort: high
-        description: "Security, authentication, payments, data migrations, deployment or concurrency changes."
+        description: "Security, authentication, payments, data migrations, deployment or
+          concurrency changes."
   risk:
     candidates:
       - id: haiku-low
@@ -312,4 +313,5 @@ router:
         provider: claude
         model: claude-opus-5-5
         reasoningEffort: high
-        description: "Security, authentication, payments, data migrations, deployment or concurrency changes."
+        description: "Security, authentication, payments, data migrations, deployment or
+          concurrency changes."
