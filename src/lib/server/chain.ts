@@ -1,4 +1,5 @@
 import "server-only"
+import { randomUUID } from "node:crypto"
 import type { Sql } from "postgres"
 import { advance, type ChainDeps, type UploadOutcome } from "@/lib/acq/pipeline"
 import { jevPrivacyScore } from "@/lib/acq/privacy"
@@ -155,9 +156,19 @@ export async function loadIntegrations(sql: Sql): Promise<IntegrationConfig> {
   return Object.fromEntries(INTEGRATION_KEYS.map((key) => [key, parseIntegrationConfig(key, byKey.get(key) ?? {})])) as IntegrationConfig
 }
 
+/** Nach dieser Zeit darf ein neuer Lauf eine liegengebliebene Markierung (abgebrochener Prozess) übernehmen. */
+export const CHAIN_RUN_TTL_SECONDS = 30 * 60
+
 /**
- * Treibt die Kette einer Kampagne voran. Läuft für diese Kampagne schon ein Lauf, startet kein zweiter:
- * Die Transaktion hält eine Advisory-Sperre (pg_try_advisory_xact_lock), die mit ihrem Ende frei wird.
+ * Treibt die Kette einer Kampagne voran. Läuft für diese Kampagne schon ein Lauf, startet kein zweiter.
+ *
+ * Die Sperre ist eine Zeile in acq.chain_runs (Kampagne, Lauf-ID, Ablaufzeit), atomar per insert ... on conflict
+ * gesetzt und im finally wieder gelöscht, auch nach einem Fehler. Bewusst keine Advisory-Sperre: Die gilt nur,
+ * solange eine Transaktion oder Verbindung offen bleibt. Eine Transaktion wäre während des ganzen Laufs (Directus,
+ * PDF, Jev, Pingen) im Leerlauf und fiele einem idle_in_transaction_session_timeout zum Opfer. Eine reservierte
+ * Verbindung (sql.reserve()) würde dem Pool (max: 3) je Lauf eine Verbindung entziehen, sodass bei drei
+ * gleichzeitigen Läufen die Abfragen in advance auf keine freie Verbindung mehr warten (Deadlock). Die Markierung
+ * braucht nur kurze Einzelabfragen.
  */
 export async function runChain(sql: Sql, campaignKey: string, env: Env = process.env, log?: (line: string) => void) {
   const lines: string[] = []
@@ -165,14 +176,24 @@ export async function runChain(sql: Sql, campaignKey: string, env: Env = process
     lines.push(line)
     log?.(line)
   }
-  const ran = await sql.begin(async (tx) => {
-    const [row] = await tx<{ locked: boolean }[]>`
-      select pg_try_advisory_xact_lock(hashtext('letterflow:acq-chain'), hashtext(${campaignKey})) as locked`
-    if (!row?.locked) return false
+  const runId = randomUUID()
+  const [claimed] = await sql<{ run_id: string }[]>`
+    insert into acq.chain_runs (campaign_key, run_id, expires_at)
+    values (${campaignKey}, ${runId}, now() + ${CHAIN_RUN_TTL_SECONDS}::int * interval '1 second')
+    on conflict (campaign_key) do update
+      set run_id = excluded.run_id, started_at = now(), expires_at = excluded.expires_at
+      where acq.chain_runs.expires_at <= now()
+    returning run_id`
+  if (!claimed) {
+    write("Für diese Kampagne läuft schon ein Lauf. Bitte warten und dann die Seite neu laden.")
+    return { ran: false, lines }
+  }
+  try {
     const integrations = await loadIntegrations(sql)
     await advance(sqlAcqStore(sql), chainDeps(sql, integrations, env, { log: write }), campaignKey, { privacyMax: integrations.jev.privacyMax })
-    return true
-  })
-  if (!ran) write("Für diese Kampagne läuft schon ein Lauf. Bitte warten und dann die Seite neu laden.")
-  return { ran, lines }
+    return { ran: true, lines }
+  } finally {
+    // Nur die eigene Markierung löschen: Nach Ablauf kann ein anderer Lauf sie übernommen haben.
+    await sql`delete from acq.chain_runs where campaign_key = ${campaignKey} and run_id = ${runId}`
+  }
 }
