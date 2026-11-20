@@ -163,3 +163,12 @@ export async function leadDetail(campaignKey: string, domain: string) {
   ])
   return { lead, evidence, events, proposal: proposals[0] }
 }
+
+/** id und aktueller PDF-Hash eines Leads, für die PDF-Ansicht. */
+export async function leadLetterPdfRef(campaignKey: string, domain: string) {
+  const [row] = await db()<{ id: string; letter_pdf_sha256: string | null }[]>`
+    select l.id, l.letter_pdf_sha256
+    from acq.leads l join acq.campaigns c on c.id = l.campaign_id
+    where c.key = ${campaignKey} and l.domain = ${domain}`
+  return row
+}
