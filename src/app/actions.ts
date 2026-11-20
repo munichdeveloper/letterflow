@@ -11,6 +11,7 @@ import { sqlAcqStore } from "@/lib/acq/store"
 import { actorFor, canReject, canResume, STAGE_FOR_STATE } from "@/lib/approvals"
 import { campaignFromForm } from "@/lib/campaigns"
 import { INTEGRATION_KEYS, parseIntegrationConfig, testIntegration, type IntegrationKey } from "@/lib/integrations"
+import { runChain } from "@/lib/server/chain"
 import { db } from "@/lib/server/db"
 import { createCampaign, getIntegration, leadDetail, recordIntegrationTest, saveIntegration, updateCampaign } from "@/lib/server/queries"
 import { requireUser } from "@/lib/server/session"
@@ -142,4 +143,21 @@ export async function decideLead(_: FormState, form: FormData): Promise<FormStat
   revalidatePath(`/campaigns/${campaign}`)
   revalidatePath(`/campaigns/${campaign}/leads/${domain}`)
   return { ok: "Gespeichert." }
+}
+
+export type ChainState = FormState & { lines?: string[] }
+
+/** Kette für eine Kampagne anstoßen. Läuft schon ein Lauf, startet kein zweiter (Sperre in runChain). */
+export async function runCampaignChain(_: ChainState, form: FormData): Promise<ChainState> {
+  await requireUser()
+  const campaign = String(form.get("campaign") ?? "").trim()
+  try {
+    if (!campaign) throw new Error("Kampagne fehlt.")
+    const { ran, lines } = await runChain(db(), campaign, process.env)
+    revalidatePath(`/campaigns/${campaign}`)
+    if (!ran) return { error: lines.join(" "), lines: [] }
+    return { ok: lines.length ? "Lauf beendet." : "Lauf beendet, es gab nichts zu tun.", lines }
+  } catch (error) {
+    return { error: message(error) }
+  }
 }

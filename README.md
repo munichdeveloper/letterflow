@@ -31,8 +31,37 @@ discovered → checked → approved → researched → page_ready → page_appro
 | Schema `acq` (Kern) | business-os `supabase/migrations/20261120110000_acq_pipeline_core.sql` |
 | Schema-Erweiterungen von letterflow | `supabase/migrations/` |
 
-Der Kern stammt aus dsb-new#88. Seitenaufbau (Directus), Brief-PDF und Versand (Pingen-Outbox) laufen vorerst
-weiter über `pnpm acq` in dsb-new und ziehen schrittweise hierher um.
+Der Kern stammt aus dsb-new#88. Seitenaufbau (Directus), Brief-PDF und Versand (Pingen-Outbox) laufen jetzt
+hier (siehe „Kette“).
+
+## Kette
+
+`src/lib/server/chain.ts` setzt `ChainDeps` aus `src/lib/acq/pipeline.ts` mit den Modulen dieses Repos um:
+Seiten in Directus (`setupPages`), Brief-PDF mit QR-Code zur Brief-URL (`briefUrls`, `buildLetterPdf`,
+gespeichert in `acq.letter_pdfs`), Jev-Prüfung und Upload in die Outbox bzw. zu Pingen. Pingen läuft nur auf
+Staging (Umgebung `sandbox` der Outbox); ein Upload nach `production` ist in keinem Code-Pfad vorgesehen.
+
+In der App startet **Kette anstoßen** auf der Kampagnenseite einen Lauf und zeigt danach seine Log-Zeilen.
+Pro Kampagne läuft höchstens ein Lauf gleichzeitig (Advisory-Sperre in der Datenbank). Dasselbe auf der Befehlszeile:
+
+```
+npm run acq -- import-leads <datei>       # Leads des Agenten (JSON) einlesen und prüfen
+npm run acq -- import-proposals <datei>   # Seitenbeschreibungen des Agenten (JSON) einlesen
+npm run acq -- run <kampagne>             # Kette bis zur nächsten Freigabe vorantreiben
+npm run acq -- status <kampagne>          # Zustand aller Leads (acq.lead_overview)
+```
+
+Freigaben gibt es auf der Befehlszeile bewusst nicht: Die gibt nur ein Mensch in der App.
+
+Umgebungsvariablen (App und Befehlszeile):
+
+- `ACQ_DATABASE_URL` (und bei Bedarf `ACQ_DATABASE_CA_CERT`): Business-OS-Datenbank, Rolle `bos_automation`.
+- `DIRECTUS_SETUP_TOKEN`: Seiten und Schlüssel anlegen, Brief-URLs lesen.
+- `PINGEN_CLIENT_ID`, `PINGEN_CLIENT_SECRET`: Pingen Staging.
+- `TYPESAFE_API_KEY`: Jev-Prüfung vor dem Upload.
+
+Die übrigen Einstellungen (Directus-URL, Collection, Website-URL, Pingen-Organisation, Jev-Modell und Grenze
+`privacyMax`) kommen aus `acq.integrations` (**Systeme** in der App).
 
 ## Einrichten
 
