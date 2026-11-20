@@ -123,3 +123,43 @@ export async function testDatabase(): Promise<TestResult> {
     return { ok: false, message: error instanceof Error ? error.message : String(error) }
   }
 }
+
+export type LeadDetail = {
+  id: string
+  campaign: string
+  company: string
+  legal_form: string
+  domain: string
+  street: string
+  postal_code: string
+  city: string
+  niche: string | null
+  fit_reason: string | null
+  slug: string | null
+  state: string
+  state_reason: string | null
+  resume_state: string | null
+  approved_revision: number | null
+  letter_pdf_sha256: string | null
+  approved_pdf_sha256: string | null
+  updated_at: Date
+}
+export type EvidenceRow = { ref: string; kind: string; claim: string; source_url: string; quote: string | null; retrieved_at: Date }
+export type EventRow = { id: number; from_state: string | null; to_state: string; actor: string; detail: Record<string, unknown>; created_at: Date }
+export type ProposalDetail = { revision: number; content: any; created_by: string; created_at: Date }
+
+export async function leadDetail(campaignKey: string, domain: string) {
+  const sql = db()
+  const [lead] = await sql<LeadDetail[]>`
+    select l.id, c.key as campaign, l.company, l.legal_form, l.domain, l.street, l.postal_code, l.city, l.niche, l.fit_reason,
+           l.slug, l.state, l.state_reason, l.resume_state, l.approved_revision, l.letter_pdf_sha256, l.approved_pdf_sha256, l.updated_at
+    from acq.leads l join acq.campaigns c on c.id = l.campaign_id
+    where c.key = ${campaignKey} and l.domain = ${domain}`
+  if (!lead) return undefined
+  const [evidence, events, proposals] = await Promise.all([
+    sql<EvidenceRow[]>`select ref, kind, claim, source_url, quote, retrieved_at from acq.evidence where lead_id = ${lead.id} order by ref`,
+    sql<EventRow[]>`select id, from_state, to_state, actor, detail, created_at from acq.events where lead_id = ${lead.id} order by id desc`,
+    sql<ProposalDetail[]>`select revision, content, created_by, created_at from acq.proposals where lead_id = ${lead.id} order by revision desc limit 1`,
+  ])
+  return { lead, evidence, events, proposal: proposals[0] }
+}

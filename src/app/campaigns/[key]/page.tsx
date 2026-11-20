@@ -25,7 +25,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ key: 
         ? <p>Interessenabwägung: {campaign.interest_balancing_ref}</p>
         : <p className="bad">Interessenabwägung fehlt: Briefe dieser Kampagne können nicht freigegeben werden.</p>}
       <h2>Leads</h2>
-      <p className="muted">Freigaben laufen vorerst weiter über <code>pnpm acq approve</code> in dsb-new; in letterflow folgen sie im nächsten Schritt.</p>
+      <p className="muted">Firma anklicken, um Belege, Seite und Brief zu sehen und freizugeben oder abzulehnen.</p>
       <div className="scroll">
         <table>
           <thead>
@@ -34,7 +34,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ key: 
           <tbody>
             {leads.map((l) => (
               <tr key={l.id}>
-                <td><strong>{l.company}</strong><div className="muted">{l.domain}</div></td>
+                <td><Link href={`/campaigns/${key}/leads/${l.domain}`}><strong>{l.company}</strong></Link><div className="muted">{l.domain}</div></td>
                 <td className={WAITING_FOR_HUMAN.includes(l.state) ? "warn" : l.state === "failed" || l.state === "rejected" ? "bad" : undefined}>
                   {STATE_LABELS[l.state] ?? l.state}
                   {l.state_reason && <div className="muted">{l.state_reason}</div>}
