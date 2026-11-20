@@ -1,7 +1,7 @@
 "use client"
 
 import { useActionState } from "react"
-import { login, runIntegrationTest, saveCampaign, saveIntegrationSettings, type FormState } from "@/app/actions"
+import { login, runCampaignChain, runIntegrationTest, saveCampaign, saveIntegrationSettings, type FormState } from "@/app/actions"
 import { OFFERS, type CampaignInput } from "@/lib/campaigns"
 
 function Status({ state }: { state: FormState }) {
@@ -120,5 +120,17 @@ export function IntegrationForm({ integration, config, avvSignedAt }: Integratio
       </form>
       <Status state={tested} />
     </>
+  )
+}
+
+export function ChainButton({ campaign }: { campaign: string }) {
+  const [state, action, pending] = useActionState(runCampaignChain, {})
+  return (
+    <form action={action} className="stack">
+      <input type="hidden" name="campaign" value={campaign} />
+      <div className="row"><button disabled={pending}>{pending ? "Kette läuft …" : "Kette anstoßen"}</button></div>
+      <Status state={state} />
+      {state.lines && state.lines.length > 0 && <pre className="scroll">{state.lines.join("\n")}</pre>}
+    </form>
   )
 }

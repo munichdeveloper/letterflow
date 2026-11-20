@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { ChainButton } from "@/components/forms"
 import { Shell } from "@/components/shell"
 import { STATE_LABELS, WAITING_FOR_HUMAN } from "@/lib/campaigns"
 import { campaignLeads, getCampaign } from "@/lib/server/queries"
@@ -24,6 +25,9 @@ export default async function CampaignPage({ params }: { params: Promise<{ key: 
       {campaign.interest_balancing_ref
         ? <p>Interessenabwägung: {campaign.interest_balancing_ref}</p>
         : <p className="bad">Interessenabwägung fehlt: Briefe dieser Kampagne können nicht freigegeben werden.</p>}
+      <h2>Kette</h2>
+      <p className="muted">Treibt jeden Lead so weit, wie es ohne Mensch geht: Seiten anlegen, Briefe bauen, freigegebene Briefe prüfen und zu Pingen (Staging) laden.</p>
+      <ChainButton campaign={campaign.key} />
       <h2>Leads</h2>
       <p className="muted">Firma anklicken, um Belege, Seite und Brief zu sehen und freizugeben oder abzulehnen.</p>
       <div className="scroll">

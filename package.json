@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "user:hash": "tsx scripts/hash-password.ts"
+    "user:hash": "tsx scripts/hash-password.ts",
+    "acq": "tsx --conditions=react-server scripts/acq.ts"
   },
   "dependencies": {
     "next": "16.4.5",
