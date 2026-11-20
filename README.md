@@ -26,6 +26,8 @@ discovered → checked → approved → researched → page_ready → page_appro
 | Jev-Prüfung vor dem Versand (personenbezogen?) | `src/lib/acq/privacy.ts` |
 | Datenbankzugriff | `src/lib/acq/store.ts` |
 | Systeme, Einstellungen, Verbindungstests | `src/lib/integrations.ts` |
+| Brief-PDF bauen (pdfkit, QR-Code) | `src/lib/chain/letter-pdf.ts` |
+| Brief-PDFs speichern und lesen (`acq.letter_pdfs`) | `src/lib/server/letter-pdfs.ts` |
 | Schema `acq` (Kern) | business-os `supabase/migrations/20261120110000_acq_pipeline_core.sql` |
 | Schema-Erweiterungen von letterflow | `supabase/migrations/` |
 
@@ -34,7 +36,8 @@ weiter über `pnpm acq` in dsb-new und ziehen schrittweise hierher um.
 
 ## Einrichten
 
-1. Migration `supabase/migrations/20261120150000_acq_integrations.sql` in der Business-OS-Datenbank einspielen.
+1. Migrationen aus `supabase/migrations/` der Reihe nach in der Business-OS-Datenbank einspielen
+   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`).
 2. `.env.example` nach `.env.local` kopieren und ausfüllen. Passwort-Hash je Person: `npm run user:hash -- <name>`.
 3. `npm install`, dann `npm run dev`.
 

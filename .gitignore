@@ -9,3 +9,5 @@ next-env.d.ts
 data/
 landingpage-qr/
 *.pdf
+# …aber nicht die Next.js-Route, die das Brief-PDF ausliefert (Verzeichnis heißt letter.pdf)
+!/src/app/**/letter.pdf/
