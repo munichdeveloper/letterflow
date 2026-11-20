@@ -38,7 +38,7 @@ execution:
   # A failed validation or a merge review that asks for changes starts a further attempt within maxRetries (software-factory#143).
   rework: true
 llm:
-  provider: mock
+  provider: static
   model: gpt-4.1-mini
   reasoningEffort: null
   maxOutputTokens: 4000
