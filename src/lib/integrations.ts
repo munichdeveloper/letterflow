@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { createPingenClient, pingenConfig } from "@/lib/chain/pingen"
 import { jevPrivacyScore, PRIVACY_MAX } from "@/lib/acq/privacy"
 
 /**
@@ -68,8 +69,6 @@ export function missingSecrets(key: IntegrationKey, env: Env = process.env) {
   return INTEGRATIONS[key].secrets.filter((name) => !env[name]?.trim())
 }
 
-const PINGEN_IDENTITY = { staging: "https://identity-staging.pingen.com", production: "https://identity.pingen.com" }
-
 /** Verbindungstest je System. Liest nur, legt nichts an und versendet nichts. */
 export async function testIntegration<K extends IntegrationKey>(
   key: K,
@@ -98,18 +97,8 @@ export async function testIntegration<K extends IntegrationKey>(
       const c = config as IntegrationConfig["pingen"]
       assertPingenAllowed(c, options.avvSignedAt ?? null)
       if (!c.organisationId) return { ok: false, message: "Organisations-ID ist nicht eingetragen." }
-      const res = await fetcher(`${PINGEN_IDENTITY[c.environment]}/auth/access-tokens`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-        body: new URLSearchParams({
-          grant_type: "client_credentials",
-          scope: "letter",
-          client_id: env.PINGEN_CLIENT_ID!.trim(),
-          client_secret: env.PINGEN_CLIENT_SECRET!.trim(),
-        }),
-        signal: AbortSignal.timeout(15_000),
-      })
-      if (!res.ok) return { ok: false, message: `Anmeldung bei Pingen (${c.environment}) fehlgeschlagen: HTTP ${res.status}.` }
+      const client = createPingenClient(pingenConfig(c, env), fetcher as typeof fetch)
+      await client.authenticate()
       return { ok: true, message: `Anmeldung bei Pingen (${c.environment}) klappt.` }
     }
     const c = config as IntegrationConfig["jev"]
