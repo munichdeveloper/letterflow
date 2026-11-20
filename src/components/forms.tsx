@@ -86,6 +86,7 @@ export function IntegrationForm({ integration, config, avvSignedAt }: Integratio
           <>
             <label>URL<input name="url" type="url" defaultValue={value("url")} placeholder="https://cms.example.de" /></label>
             <label>Collection der Landingpages<input name="collection" defaultValue={value("collection") || "landingpages"} /></label>
+            <label>Website-URL (ohne abschließenden Slash)<input name="siteUrl" type="url" defaultValue={value("siteUrl")} placeholder="https://www.example.de" /></label>
           </>
         )}
         {integration === "pingen" && (
