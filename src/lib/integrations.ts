@@ -17,6 +17,12 @@ export const IntegrationConfigSchemas = {
     .object({
       url: z.string().url().refine((u) => u.startsWith("https://"), "Directus-URL muss https sein").optional(),
       collection: z.string().regex(/^[a-z0-9_]{2,60}$/).default("landingpages"),
+      siteUrl: z
+        .string()
+        .url()
+        .refine((u) => u.startsWith("https://"), "Website-URL muss https sein")
+        .refine((u) => !u.endsWith("/"), "Website-URL ohne abschließenden Slash")
+        .optional(),
     })
     .strict(),
   pingen: z

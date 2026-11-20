@@ -68,7 +68,7 @@ function integrationKey(form: FormData): IntegrationKey {
 
 function configFromForm(key: IntegrationKey, form: FormData) {
   const text = (name: string) => String(form.get(name) ?? "").trim() || undefined
-  if (key === "directus") return { url: text("url"), collection: text("collection") }
+  if (key === "directus") return { url: text("url"), collection: text("collection"), siteUrl: text("siteUrl") }
   if (key === "pingen") return { environment: text("environment"), organisationId: text("organisationId") }
   const max = text("privacyMax")
   return { model: text("model"), privacyMax: max === undefined ? undefined : Number(max.replace(",", ".")) }

@@ -52,6 +52,9 @@ describe("Angebundene Systeme", () => {
   it("lehnt Secrets in den Einstellungen ab", () => {
     expect(() => parseIntegrationConfig("directus", { url: "https://cms.example.de", token: "geheim" })).toThrow()
     expect(() => parseIntegrationConfig("directus", { url: "http://cms.example.de" })).toThrow()
+    expect(parseIntegrationConfig("directus", { siteUrl: "https://www.example.de" }).siteUrl).toBe("https://www.example.de")
+    expect(() => parseIntegrationConfig("directus", { siteUrl: "https://www.example.de/" })).toThrow()
+    expect(() => parseIntegrationConfig("directus", { siteUrl: "http://www.example.de" })).toThrow()
     expect(parseIntegrationConfig("jev", {})).toEqual({ model: "jev-latest", privacyMax: 0.3 })
   })
 
