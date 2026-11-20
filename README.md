@@ -42,7 +42,7 @@ gespeichert in `acq.letter_pdfs`), Jev-Prüfung und Upload in die Outbox bzw. zu
 Staging (Umgebung `sandbox` der Outbox); ein Upload nach `production` ist in keinem Code-Pfad vorgesehen.
 
 In der App startet **Kette anstoßen** auf der Kampagnenseite einen Lauf und zeigt danach seine Log-Zeilen.
-Pro Kampagne läuft höchstens ein Lauf gleichzeitig (Advisory-Sperre in der Datenbank). Dasselbe auf der Befehlszeile:
+Pro Kampagne läuft höchstens ein Lauf gleichzeitig (Lauf-Markierung in `acq.chain_runs`, ohne offene Transaktion). Dasselbe auf der Befehlszeile:
 
 ```
 npm run acq -- import-leads <datei>       # Leads des Agenten (JSON) einlesen und prüfen
@@ -66,7 +66,7 @@ Die übrigen Einstellungen (Directus-URL, Collection, Website-URL, Pingen-Organi
 ## Einrichten
 
 1. Migrationen aus `supabase/migrations/` der Reihe nach in der Business-OS-Datenbank einspielen
-   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`).
+   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`, `20261120170000_acq_chain_runs.sql`).
 2. `.env.example` nach `.env.local` kopieren und ausfüllen. Passwort-Hash je Person: `npm run user:hash -- <name>`.
 3. `npm install`, dann `npm run dev`.
 
