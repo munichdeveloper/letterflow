@@ -71,7 +71,7 @@ describe("Angebundene Systeme", () => {
   it("testet Pingen gegen den Identity-Host der Umgebung", async () => {
     const urls: string[] = []
     const env = { PINGEN_CLIENT_ID: "id", PINGEN_CLIENT_SECRET: "secret" }
-    const fetcher = async (url: string) => { urls.push(url); return new Response("{}", { status: 200 }) }
+    const fetcher = async (url: string) => { urls.push(url); return new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 }) }
     const ok = await testIntegration("pingen", { environment: "staging", organisationId: "00000000-0000-4000-8000-000000000001" }, { env, fetcher })
     expect(ok.ok).toBe(true)
     expect(urls).toEqual(["https://identity-staging.pingen.com/auth/access-tokens"])
