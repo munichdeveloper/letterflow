@@ -1,0 +1,11 @@
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+# Kampagnendaten (Leads, Vorschläge, Briefe, QR-Schlüssel) gehören nie ins öffentliche Repo
+data/
+landingpage-qr/
+*.pdf
