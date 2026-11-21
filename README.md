@@ -11,7 +11,7 @@ App für die B2B-Briefakquise: Kampagnen anlegen, Leads durch die Kette verfolge
 Die Daten liegen im Schema `acq` der Business-OS-Datenbank (Supabase). Jeder Lead hat einen Zustand; ändern
 darf ihn nur die Datenbankfunktion `acq.transition`. Sie prüft erlaubte Übergänge, bindet Freigaben an einen
 Menschen (`human:<name>`), an die Revision des Seitentextes bzw. den Hash des Brief-PDFs und verlangt vor jeder
-Brieffreigabe eine dokumentierte Interessenabwägung der Kampagne.
+Brieffreigabe, dass die neueste Interessenabwägung der Kampagne freigegeben ist (Regel 7, siehe „Interessenabwägung“).
 
 ```
 discovered → checked → approved → researched → page_ready → page_approved → letter_ready → letter_approved → queued → sent
@@ -28,6 +28,7 @@ discovered → checked → approved → researched → page_ready → page_appro
 | Systeme, Einstellungen, Verbindungstests | `src/lib/integrations.ts` |
 | Brief-PDF bauen (pdfkit, QR-Code) | `src/lib/chain/letter-pdf.ts` |
 | Brief-PDFs speichern und lesen (`acq.letter_pdfs`) | `src/lib/server/letter-pdfs.ts` |
+| Interessenabwägung prüfen, speichern, freigeben (`acq.interest_balancings`) | `src/lib/interest-balancing.ts`, `src/lib/server/interest-balancings.ts` |
 | Schema `acq` (Kern) | business-os `supabase/migrations/20261120110000_acq_pipeline_core.sql` |
 | Schema-Erweiterungen von letterflow | `supabase/migrations/` |
 
@@ -66,11 +67,23 @@ Die übrigen Einstellungen (Directus-URL, Collection, Website-URL, Pingen-Organi
 ## Einrichten
 
 1. Migrationen aus `supabase/migrations/` der Reihe nach in der Business-OS-Datenbank einspielen
-   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`, `20261120170000_acq_chain_runs.sql`).
+   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`, `20261120170000_acq_chain_runs.sql`,
+   `20261121100000_acq_interest_balancings.sql`).
 2. `.env.example` nach `.env.local` kopieren und ausfüllen. Passwort-Hash je Person: `npm run user:hash -- <name>`.
 3. `npm install`, dann `npm run dev`.
 
-Prüfen: `npm test`, `npm run typecheck`, `npm run build`.
+Prüfen: `npm test`, `npm run typecheck`, `npm run build`. Die Datenbank-Tests (`tests/interest-balancing-db.test.ts`)
+starten ein Wegwerf-Postgres über `initdb`/`pg_ctl` (oder nutzen `ACQ_TEST_DATABASE_URL`) und laufen gegen ein
+Testgerüst des Kerns; ohne Postgres werden sie übersprungen.
+
+## Interessenabwägung
+
+Auf **Bearbeiten** einer Kampagne lädt man die Abwägung (Art. 6 Abs. 1 lit. f DSGVO) als `.md` oder PDF hoch, höchstens
+2 MB. Jede Datei wird eine neue Version in `acq.interest_balancings`; gespeicherte Dateien ändern sich nie. **Abwägung
+freigeben** ruft `acq.approve_interest_balancing` mit dem angemeldeten Menschen auf; die Datenbank nimmt nur `human:<name>`,
+den angezeigten SHA-256 und die neueste Version an. Eine Brieffreigabe geht nur, solange die neueste Version freigegeben
+ist; das Ereignis hält `id`, `version` und `sha256` der Abwägung fest. Das alte Freitextfeld `interest_balancing_ref` zählt
+nicht mehr und wird in der App nicht mehr bearbeitet.
 
 ## Angebundene Systeme
 

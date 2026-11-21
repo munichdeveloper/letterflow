@@ -25,7 +25,6 @@ export const CampaignInputSchema = z.object({
   offer: z.enum(OFFERS),
   segment: line(300),
   letter: LetterSettingsSchema,
-  interestBalancingRef: z.string().trim().max(300).optional().transform((v) => v || null),
   status: z.enum(CAMPAIGN_STATUS).default("active"),
 })
 export type CampaignInput = z.infer<typeof CampaignInputSchema>
@@ -38,7 +37,6 @@ export function campaignFromForm(form: FormData): CampaignInput {
     title: text("title"),
     offer: text("offer"),
     segment: text("segment"),
-    interestBalancingRef: text("interestBalancingRef"),
     status: text("status") || "active",
     letter: {
       sender: text("sender"),

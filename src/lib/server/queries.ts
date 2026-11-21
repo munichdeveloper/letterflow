@@ -1,5 +1,6 @@
 import "server-only"
 import type { CampaignInput } from "@/lib/campaigns"
+import type { InterestBalancingStatus } from "@/lib/interest-balancing"
 import { assertPingenAllowed, INTEGRATION_KEYS, parseIntegrationConfig, type IntegrationKey, type TestResult } from "@/lib/integrations"
 import { db } from "@/lib/server/db"
 
@@ -9,14 +10,21 @@ export type CampaignSummary = {
   offer: string
   segment: string
   status: string
-  interest_balancing_ref: string | null
   letter: Record<string, unknown>
   counts: Record<string, number>
+  /** Neueste Version der Interessenabwägung (Regel 7) oder null. */
+  interest_balancing: InterestBalancingStatus | null
 }
 
+// Neueste Version der Interessenabwägung je Kampagne, ohne Inhalt.
+const LATEST_BALANCING = `(select to_jsonb(b) from (
+    select ib.id, ib.version, ib.file_name, ib.content_type, ib.sha256, ib.uploaded_by, ib.uploaded_at, ib.approved_by, ib.approved_at
+    from acq.interest_balancings ib where ib.campaign_id = c.id order by ib.version desc limit 1) b) as interest_balancing`
+
 export async function listCampaigns() {
-  return db()<CampaignSummary[]>`
-    select c.key, c.title, c.offer, c.segment, c.status, c.interest_balancing_ref, c.letter,
+  const sql = db()
+  return sql<CampaignSummary[]>`
+    select c.key, c.title, c.offer, c.segment, c.status, c.letter, ${sql.unsafe(LATEST_BALANCING)},
            coalesce((select jsonb_object_agg(state, n) from (
               select l.state, count(*)::int as n from acq.leads l where l.campaign_id = c.id group by l.state) s), '{}'::jsonb) as counts
     from acq.campaigns c
@@ -24,8 +32,9 @@ export async function listCampaigns() {
 }
 
 export async function getCampaign(key: string) {
-  const [row] = await db()<CampaignSummary[]>`
-    select c.key, c.title, c.offer, c.segment, c.status, c.interest_balancing_ref, c.letter, '{}'::jsonb as counts
+  const sql = db()
+  const [row] = await sql<CampaignSummary[]>`
+    select c.key, c.title, c.offer, c.segment, c.status, c.letter, '{}'::jsonb as counts, ${sql.unsafe(LATEST_BALANCING)}
     from acq.campaigns c where c.key = ${key}`
   return row
 }
@@ -54,8 +63,8 @@ export async function campaignLeads(key: string) {
 export async function createCampaign(input: CampaignInput) {
   const sql = db()
   const [row] = await sql<{ key: string }[]>`
-    insert into acq.campaigns (key, title, offer, segment, letter, interest_balancing_ref, status)
-    values (${input.key}, ${input.title}, ${input.offer}, ${input.segment}, ${sql.json(input.letter)}, ${input.interestBalancingRef}, ${input.status})
+    insert into acq.campaigns (key, title, offer, segment, letter, status)
+    values (${input.key}, ${input.title}, ${input.offer}, ${input.segment}, ${sql.json(input.letter)}, ${input.status})
     on conflict (key) do nothing
     returning key`
   if (!row) throw new Error(`Eine Kampagne mit dem Schlüssel „${input.key}“ gibt es schon.`)
@@ -66,7 +75,7 @@ export async function updateCampaign(key: string, input: CampaignInput) {
   const sql = db()
   const [row] = await sql<{ key: string }[]>`
     update acq.campaigns set title = ${input.title}, offer = ${input.offer}, segment = ${input.segment},
-      letter = ${sql.json(input.letter)}, interest_balancing_ref = ${input.interestBalancingRef}, status = ${input.status}
+      letter = ${sql.json(input.letter)}, status = ${input.status}
     where key = ${key} returning key`
   if (!row) throw new Error(`Kampagne „${key}“ gibt es nicht.`)
   return row.key

@@ -5,6 +5,7 @@ import { Shell } from "@/components/shell"
 import { letterAddress } from "@/lib/acq/rules"
 import { canReject, canResume, STAGE_FOR_STATE, STAGE_LABELS } from "@/lib/approvals"
 import { STATE_LABELS, WAITING_FOR_HUMAN } from "@/lib/campaigns"
+import { interestBalancingLabel, isInterestBalancingApproved } from "@/lib/interest-balancing"
 import { getCampaign, leadDetail } from "@/lib/server/queries"
 import { requireUser } from "@/lib/server/session"
 
@@ -21,7 +22,7 @@ export default async function LeadPage({ params }: { params: Promise<{ key: stri
   const stage = STAGE_FOR_STATE[lead.state]
   const page = proposal?.content?.page
   const letter = proposal?.content?.letter
-  const missingBalancing = stage === "letter" && !campaign.interest_balancing_ref
+  const missingBalancing = stage === "letter" && !isInterestBalancingApproved(campaign.interest_balancing)
 
   return (
     <Shell user={user.name}>
@@ -33,12 +34,16 @@ export default async function LeadPage({ params }: { params: Promise<{ key: stri
         {lead.state_reason && <> · {lead.state_reason}</>}
       </p>
       {missingBalancing && (
-        <p className="bad">Für diese Kampagne fehlt die Interessenabwägung. <Link href={`/campaigns/${key}/edit`}>Eintragen</Link>, sonst lässt die Datenbank keine Brieffreigabe zu.</p>
+        <p className="bad">
+          {interestBalancingLabel(campaign.interest_balancing)}. <Link href={`/campaigns/${key}/edit`}>{campaign.interest_balancing ? "Freigeben" : "Hochladen und freigeben"}</Link>,
+          sonst lässt die Datenbank keine Brieffreigabe zu.
+        </p>
       )}
       {stage === "letter" && (
         <p className="muted">
           {lead.letter_pdf_sha256 && <><a href={`/campaigns/${key}/leads/${encodeURIComponent(lead.domain)}/letter.pdf`} target="_blank" rel="noreferrer">Brief-PDF ansehen</a> · </>}
           Freigegeben wird genau das PDF mit dem Hash {lead.letter_pdf_sha256?.slice(0, 12)}…
+          {!missingBalancing && <> · {interestBalancingLabel(campaign.interest_balancing)}</>}
         </p>
       )}
 

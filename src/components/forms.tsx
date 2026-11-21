@@ -1,8 +1,11 @@
 "use client"
 
 import { useActionState } from "react"
-import { login, runCampaignChain, runIntegrationTest, saveCampaign, saveIntegrationSettings, type FormState } from "@/app/actions"
+import {
+  approveInterestBalancingVersion, login, runCampaignChain, runIntegrationTest, saveCampaign, saveIntegrationSettings, uploadInterestBalancing, type FormState,
+} from "@/app/actions"
 import { OFFERS, type CampaignInput } from "@/lib/campaigns"
+import { INTEREST_BALANCING_ACCEPT } from "@/lib/interest-balancing"
 
 function Status({ state }: { state: FormState }) {
   if (state.error) return <p className="bad" role="alert">{state.error}</p>
@@ -39,9 +42,6 @@ export function CampaignForm({ campaign }: { campaign?: CampaignInput }) {
       </label>
       <label>Segment<small>Wen die Kampagne anschreibt (nur GmbH, UG, AG).</small>
         <textarea name="segment" defaultValue={campaign?.segment} required maxLength={300} />
-      </label>
-      <label>Interessenabwägung<small>Verweis auf die dokumentierte Abwägung. Ohne sie lässt die Datenbank keine Brieffreigabe zu (Regel 7).</small>
-        <input name="interestBalancingRef" defaultValue={campaign?.interestBalancingRef ?? ""} maxLength={300} />
       </label>
       {campaign && (
         <label>Status
@@ -131,6 +131,38 @@ export function ChainButton({ campaign }: { campaign: string }) {
       <div className="row"><button disabled={pending}>{pending ? "Kette läuft …" : "Kette anstoßen"}</button></div>
       <Status state={state} />
       {state.lines && state.lines.length > 0 && <pre className="scroll">{state.lines.join("\n")}</pre>}
+    </form>
+  )
+}
+
+/** Neue Version der Interessenabwägung hochladen (.md oder .pdf, höchstens 2 MB). */
+export function InterestBalancingUpload({ campaign }: { campaign: string }) {
+  const [state, action, pending] = useActionState(uploadInterestBalancing, {})
+  return (
+    <form action={action} className="stack">
+      <input type="hidden" name="campaign" value={campaign} />
+      <label>Neue Version hochladen<small>Markdown (.md) oder PDF, höchstens 2 MB. Jede Datei wird eine neue Version; bis zu ihrer Freigabe lässt die Datenbank keine Brieffreigabe zu.</small>
+        <input name="file" type="file" accept={INTEREST_BALANCING_ACCEPT} required />
+      </label>
+      <div className="row"><button disabled={pending}>{pending ? "Lade hoch …" : "Hochladen"}</button></div>
+      <Status state={state} />
+    </form>
+  )
+}
+
+/** Digitale Freigabe der neuesten Version. Schickt den angezeigten SHA-256 mit; der Akteur kommt aus der Sitzung. */
+export function InterestBalancingApprove({ campaign, id, sha256, version }: { campaign: string; id: string; sha256: string; version: number }) {
+  const [state, action, pending] = useActionState(approveInterestBalancingVersion, {})
+  return (
+    <form action={action} className="stack">
+      <input type="hidden" name="campaign" value={campaign} />
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="sha256" value={sha256} />
+      <div className="row">
+        <button disabled={pending}>Abwägung freigeben</button>
+        <span className="muted">v{version} · SHA-256 {sha256.slice(0, 12)}…</span>
+      </div>
+      <Status state={state} />
     </form>
   )
 }
