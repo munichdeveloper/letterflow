@@ -14,6 +14,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ key
       "Content-Type": file.contentType,
       "Content-Disposition": "inline",
       "X-Content-Type-Options": "nosniff",
+      // Markdown läuft nie als Seite mit Skripten oder Formularen. PDFs ohne Sandbox, weil der PDF-Viewer des Browsers
+      // in einer Sandbox nicht öffnet; andere Typen lässt die Datenbank nicht zu.
+      ...(file.contentType.startsWith("application/pdf") ? {} : { "Content-Security-Policy": "default-src 'none'; sandbox" }),
       "Cache-Control": "private, no-store",
     },
   })
