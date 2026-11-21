@@ -28,6 +28,8 @@ autonomy:
     expand_scope: deny
     merge_pr: allow # Mandatory independent AI review and the required checks still apply.
 execution:
+  # Johannes 2026-11-20 (SF #188): one extra rescue attempt with workers.coding.retryAgents after the last regular one.
+  rescue: { enabled: true, maxPerDay: 3 }
   dryRun: false
   maxParallelWorkers: 1
   maxRetries: 2
