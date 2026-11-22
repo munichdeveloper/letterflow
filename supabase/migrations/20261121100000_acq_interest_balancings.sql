@@ -110,11 +110,14 @@ begin
 end $$;
 
 -- Geltende Abwägung einer Kampagne: die neueste Version, falls freigegeben. Sonst Fehler (Regel 7).
+-- Nimmt dieselbe Sperre je Kampagne wie Upload und Freigabe: Lädt jemand gleichzeitig eine neue Version hoch, wartet die
+-- Brieffreigabe auf deren Commit und prüft dann gegen die neue (noch nicht freigegebene) Version.
 create function acq.approved_interest_balancing(p_campaign_id uuid) returns acq.interest_balancings
 language plpgsql security definer set search_path = '' as $$
 declare
   b acq.interest_balancings;
 begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('acq.interest_balancings:' || p_campaign_id::text, 0));
   select * into b from acq.interest_balancings where campaign_id = p_campaign_id order by version desc limit 1;
   if not found then
     raise exception 'letter approval needs an interest balancing: campaign % has none uploaded', p_campaign_id;
