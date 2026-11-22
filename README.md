@@ -105,10 +105,14 @@ Login je Person, weil jede Freigabe einem Menschen zugeordnet wird. Nutzer stehe
 ## MCP-Endpunkt
 
 `/api/mcp` ist ein geschützter MCP-Server (Streamable HTTP, zustandslos, Node-Runtime, offizielles
-`@modelcontextprotocol/sdk`). Er bietet bisher genau ein Tool, nur lesend:
+`@modelcontextprotocol/sdk`). Er bietet bisher zwei Tools, nur lesend:
 
 - `letterflow_list_campaigns` – Eingabe `{status?: "active"|"paused"|"closed", limit?: 1–100}`; Ausgabe je Kampagne
   nur `key`, `title`, `offer`, `segment`, `status`, `counts` (kein Brieftext, keine Interessenabwägung).
+- `letterflow_get_status` – Eingabe `{campaign: string, domain?: string, limit?: 1–100 (Standard 50)}`; Ausgabe je Lead
+  nur `company`, `domain`, `state`, `state_reason`, `latest_revision`, `approved_revision`, `evidence_count`,
+  `letter_status`, `updated_at` (bei `domain` zusätzlich `requires_human_approval`). Keine Anschriften, Texte,
+  PDF-Hashes oder Schlüssel; unbekannte Kampagne/Domain ergibt eine kontrollierte Fehlermeldung.
 
 Jeder Request braucht `Authorization: Bearer <token>`; Web-Cookies gelten nicht. Ohne gültiges Token oder bei
 fehlender bzw. ungültiger Konfiguration antwortet der Endpunkt mit 401 bzw. 503, ohne die Datenbank anzufassen.

@@ -4,13 +4,11 @@
 -- Voraussetzung: business-os 20261120110000_acq_pipeline_core.sql (Schema acq, acq.campaigns, acq.leads, acq.events,
 -- acq.transition, Rolle bos_automation).
 --
--- Umsetzung von Regel 7: acq.transition ist der einzige Weg, einen Lead nach letter_approved zu bringen. Sie aktualisiert
--- dabei acq.leads und schreibt ein Ereignis in acq.events. Die Trigger unten hängen sich an genau diese beiden Schritte:
---   * acq.leads: kein Übergang nach letter_approved ohne freigegebene neueste Abwägung (Fehler bricht die Transaktion ab),
---   * acq.events: das Ereignis der Brieffreigabe bekommt im detail id, version und sha256 der geltenden Abwägung.
--- Die übrige Logik von acq.transition (erlaubte Übergänge, Mensch, Revision, PDF-Hash) bleibt unverändert.
--- Ihre alte Prüfung „interest_balancing_ref nicht leer“ erfüllt acq.approve_interest_balancing, indem sie eine leere
--- Spalte mit einem Verweis auf die freigegebene Version füllt; ein vorhandener Freitext bleibt stehen, zählt aber nicht.
+-- Umsetzung von Regel 7: acq.transition ist der einzige Weg, einen Lead nach letter_approved zu bringen. Diese Migration
+-- ersetzt sie durch eine neue Fassung, die bis auf Regel 7 der Fassung aus dem Kern entspricht (erlaubte Übergänge,
+-- Sperrliste, Mensch, Revision, PDF-Hash). Für letter_approved verlangt sie statt „interest_balancing_ref nicht leer“
+-- die freigegebene neueste Abwägung der Kampagne, hält dafür die Sperre der Kampagne (kein Upload dazwischen) und
+-- schreibt id, version und sha256 der Abwägung in das Ereignis.
 
 create table acq.interest_balancings (
   id uuid primary key default gen_random_uuid(),
@@ -103,9 +101,6 @@ begin
     return b; -- schon freigegeben, nichts ändern
   end if;
   update acq.interest_balancings set approved_by = p_actor, approved_at = pg_catalog.now() where id = p_id returning * into b;
-  -- Alte Prüfung in acq.transition (Spalte nicht leer) erfüllen, ohne vorhandenen Text zu überschreiben.
-  update acq.campaigns set interest_balancing_ref = 'letterflow:interest_balancings/' || b.id::text
-  where id = b.campaign_id and coalesce(pg_catalog.btrim(interest_balancing_ref), '') = '';
   return b;
 end $$;
 
@@ -128,36 +123,89 @@ begin
   return b;
 end $$;
 
--- Regel 7 am Lead: kein Übergang nach letter_approved ohne freigegebene neueste Abwägung.
-create function acq.leads_require_interest_balancing() returns trigger
-language plpgsql security definer set search_path = '' as $$
-begin
-  perform acq.approved_interest_balancing(new.campaign_id);
-  return new;
-end $$;
-
-create trigger leads_require_interest_balancing_insert before insert on acq.leads
-  for each row when (new.state::text = 'letter_approved')
-  execute function acq.leads_require_interest_balancing();
-create trigger leads_require_interest_balancing_update before update of state on acq.leads
-  for each row when (new.state::text = 'letter_approved' and old.state is distinct from new.state)
-  execute function acq.leads_require_interest_balancing();
-
--- Ereignis der Brieffreigabe: id, version und sha256 der geltenden Abwägung festhalten.
-create function acq.events_interest_balancing_detail() returns trigger
+-- acq.transition mit neuer Regel 7. Signatur, Rückgabe und Rechte bleiben wie im Kern.
+create or replace function acq.transition(p_lead_id uuid, p_to text, p_actor text, p_reason text default null, p_detail jsonb default '{}'::jsonb)
+returns acq.leads
 language plpgsql security definer set search_path = '' as $$
 declare
-  b acq.interest_balancings;
+  v_lead acq.leads%rowtype;
+  v_to text := p_to;
+  v_reason text := p_reason;
+  v_detail jsonb := coalesce(p_detail, '{}'::jsonb);
+  v_balancing acq.interest_balancings%rowtype;
+  v_prev text;
 begin
-  b := acq.approved_interest_balancing((select l.campaign_id from acq.leads l where l.id = new.lead_id));
-  new.detail := coalesce(new.detail, '{}'::jsonb)
-    || pg_catalog.jsonb_build_object('interest_balancing', pg_catalog.jsonb_build_object('id', b.id, 'version', b.version, 'sha256', b.sha256));
-  return new;
-end $$;
+  select * into v_lead from acq.leads where id = p_lead_id for update;
+  if not found then raise exception 'lead % not found', p_lead_id using errcode = 'P0002'; end if;
+  if coalesce(pg_catalog.btrim(p_actor), '') = '' then raise exception 'actor required' using errcode = '22023'; end if;
+  v_prev := v_lead.state;
 
-create trigger events_interest_balancing_detail before insert on acq.events
-  for each row when (new.to_state::text = 'letter_approved')
-  execute function acq.events_interest_balancing_detail();
+  if v_to not in ('suppressed', 'rejected', 'failed') and acq.is_suppressed(v_lead.domain, v_lead.company) then
+    v_to := 'suppressed';
+    v_reason := 'Sperrliste';
+  end if;
+
+  if v_lead.state = 'failed' then
+    if v_to <> coalesce(v_lead.resume_state, '') and v_to not in ('rejected', 'suppressed') then
+      raise exception 'failed lead % can only resume to %', p_lead_id, v_lead.resume_state using errcode = '22023';
+    end if;
+  elsif not acq.allowed_transition(v_lead.state, v_to) then
+    raise exception 'transition % -> % not allowed', v_lead.state, v_to using errcode = '22023';
+  end if;
+
+  if v_to in ('approved', 'page_approved', 'letter_approved') and p_actor !~ '^human:.+' then
+    raise exception 'state % needs a human approval', v_to using errcode = '42501';
+  end if;
+
+  if v_to = 'page_approved' then
+    if (v_detail->>'revision') is null
+       or (v_detail->>'revision')::int <> (select max(revision) from acq.proposals where lead_id = p_lead_id) then
+      raise exception 'page approval must name the latest proposal revision' using errcode = '22023';
+    end if;
+  end if;
+
+  if v_to = 'letter_ready' and coalesce(v_detail->>'pdf_sha256', '') !~ '^[0-9a-f]{64}$' then
+    raise exception 'letter_ready needs pdf_sha256' using errcode = '22023';
+  end if;
+
+  if v_to = 'letter_approved' then
+    if v_lead.letter_pdf_sha256 is null or v_detail->>'pdf_sha256' is distinct from v_lead.letter_pdf_sha256 then
+      raise exception 'letter approval must name the current PDF hash' using errcode = '22023';
+    end if;
+    -- Regel 7: neueste Abwägung der Kampagne muss freigegeben sein. Die Sperre der Kampagne hält bis zum Ende der
+    -- Transaktion, damit kein Upload einer neueren Version zwischen Prüfung und Freigabe des Briefs fällt.
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('acq.interest_balancings:' || v_lead.campaign_id::text, 0));
+    v_balancing := acq.approved_interest_balancing(v_lead.campaign_id);
+    v_detail := v_detail || pg_catalog.jsonb_build_object('interest_balancing',
+      pg_catalog.jsonb_build_object('id', v_balancing.id, 'version', v_balancing.version, 'sha256', v_balancing.sha256));
+  end if;
+
+  perform pg_catalog.set_config('acq.in_transition', 'on', true);
+  update acq.leads l set
+    state = v_to,
+    state_reason = v_reason,
+    resume_state = case when v_to = 'failed' then v_prev else null end,
+    approved_revision = case
+      when v_to = 'page_approved' then (v_detail->>'revision')::int
+      when v_to = 'researched' then null
+      else l.approved_revision end,
+    letter_pdf_sha256 = case
+      when v_to = 'letter_ready' then v_detail->>'pdf_sha256'
+      when v_to = 'researched' then null
+      else l.letter_pdf_sha256 end,
+    approved_pdf_sha256 = case
+      when v_to = 'letter_approved' then v_detail->>'pdf_sha256'
+      when v_to in ('researched', 'letter_ready') then null
+      else l.approved_pdf_sha256 end,
+    updated_at = pg_catalog.now()
+  where l.id = p_lead_id
+  returning * into v_lead;
+  perform pg_catalog.set_config('acq.in_transition', 'off', true);
+
+  insert into acq.events (lead_id, from_state, to_state, actor, detail)
+  values (p_lead_id, v_prev, v_to, p_actor, v_detail || pg_catalog.jsonb_build_object('reason', v_reason));
+  return v_lead;
+end $$;
 
 -- Rechte: nur lesen und einfügen (ohne version und Freigabe-Spalten), freigeben nur über die Funktion.
 alter table acq.interest_balancings enable row level security;
@@ -176,5 +224,3 @@ revoke all on function acq.approved_interest_balancing(uuid) from public, anon, 
 revoke all on function acq.interest_balancings_before_insert() from public, anon, authenticated;
 revoke all on function acq.interest_balancings_before_update() from public, anon, authenticated;
 revoke all on function acq.interest_balancings_before_delete() from public, anon, authenticated;
-revoke all on function acq.leads_require_interest_balancing() from public, anon, authenticated;
-revoke all on function acq.events_interest_balancing_detail() from public, anon, authenticated;

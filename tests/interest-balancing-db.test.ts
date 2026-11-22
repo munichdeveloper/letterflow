@@ -11,7 +11,7 @@ import { startTestDatabase, type TestDatabase } from "./helpers/postgres"
 
 /**
  * Regel 7 in der Datenbank: Migration 20261121100000_acq_interest_balancings.sql gegen ein Testgerüst des Kerns
- * (tests/fixtures/acq-core-stub.sql). Nur erfundene Daten. Die App-Verbindung hat die Rechte von bos_automation.
+ * (tests/fixtures/acq-core-stub.sql, mit acq.transition und acq.allowed_transition in der Fassung der Produktion). Nur erfundene Daten. Die App-Verbindung hat die Rechte von bos_automation.
  */
 
 const started = await startTestDatabase()
@@ -142,6 +142,29 @@ describe.skipIf(!pg)("Interessenabwägung in der Datenbank (Regel 7)", () => {
     const v1 = await saveInterestBalancing("beispiel-ohne-ref", await upload("abwaegung.md", "# Abwägung"), ACTOR, app)
     await approveInterestBalancing("beispiel-ohne-ref", v1.id, v1.sha256, ACTOR, app)
     expect((await approveLetter(app, lead))[0].state).toBe("letter_approved")
+    // Die Freigabe der Abwägung schreibt nichts mehr in das alte Feld
+    const [campaign] = await app<{ interest_balancing_ref: string | null }[]>`
+      select interest_balancing_ref from acq.campaigns where key = 'beispiel-ohne-ref'`
+    expect(campaign.interest_balancing_ref).toBeNull()
+  })
+
+  it("die neue acq.transition behält die übrigen Regeln des Kerns", async () => {
+    await createCampaign(app, "beispiel-regeln")
+    const v1 = await saveInterestBalancing("beispiel-regeln", await upload("abwaegung.md", "# Abwägung"), ACTOR, app)
+    await approveInterestBalancing("beispiel-regeln", v1.id, v1.sha256, ACTOR, app)
+    const lead = await letterReadyLead(app, "beispiel-regeln", "beispiel-vier.de")
+    const transition = (to: string, actor: string, detail: Record<string, unknown>) =>
+      app`select state from acq.transition(${lead}, ${to}, ${actor}, null, ${app.json(detail as never)})`
+    await expect(transition("letter_approved", "agent:x", { pdf_sha256: PDF_HASH })).rejects.toThrow(/needs a human approval/)
+    await expect(transition("letter_approved", ACTOR, { pdf_sha256: "b".repeat(64) })).rejects.toThrow(/current PDF hash/)
+    await expect(transition("sent", ACTOR, {})).rejects.toThrow(/not allowed/)
+    await expect(transition("letter_approved", " ", { pdf_sha256: PDF_HASH })).rejects.toThrow(/actor required/)
+    await db.admin`insert into acq.suppressions (domain) values ('beispiel-vier.de')`
+    expect((await transition("letter_approved", ACTOR, { pdf_sha256: PDF_HASH }))[0].state).toBe("suppressed")
+    const [event] = await app<{ detail: Record<string, any> }[]>`
+      select detail from acq.events where lead_id = ${lead} order by id desc limit 1`
+    expect(event.detail.reason).toBe("Sperrliste")
+    expect(event.detail.interest_balancing).toBeUndefined()
   })
 
   it("bos_automation kann gespeicherte Abwägungen weder ändern noch löschen noch vorab freigeben", async () => {
