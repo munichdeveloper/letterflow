@@ -13,6 +13,7 @@
     "acq": "tsx --conditions=react-server scripts/acq.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.0",
     "next": "16.4.5",
     "pdfkit": "^0.17.2",
     "postgres": "4.1.0",

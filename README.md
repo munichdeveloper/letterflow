@@ -89,6 +89,48 @@ Jeder Test liest nur, legt nichts an und versendet nichts.
 Login je Person, weil jede Freigabe einem Menschen zugeordnet wird. Nutzer stehen in `LETTERFLOW_USERS`
 (`name:scrypt:<salt>:<hash>`, mehrere mit Komma), die Sitzung ist ein signiertes Cookie (`LETTERFLOW_SESSION_SECRET`).
 
+## MCP-Endpunkt
+
+`/api/mcp` ist ein geschützter MCP-Server (Streamable HTTP, zustandslos, Node-Runtime, offizielles
+`@modelcontextprotocol/sdk`). Er bietet bisher genau ein Tool, nur lesend:
+
+- `letterflow_list_campaigns` – Eingabe `{status?: "active"|"paused"|"closed", limit?: 1–100}`; Ausgabe je Kampagne
+  nur `key`, `title`, `offer`, `segment`, `status`, `counts` (kein Brieftext, keine Interessenabwägung).
+
+Jeder Request braucht `Authorization: Bearer <token>`; Web-Cookies gelten nicht. Ohne gültiges Token oder bei
+fehlender bzw. ungültiger Konfiguration antwortet der Endpunkt mit 401 bzw. 503, ohne die Datenbank anzufassen.
+Es gibt nur `POST` (kein Server-Stream, keine Sitzungen); Anfragen sind auf 64 KB begrenzt.
+Das Audit-Log (`console.info`, JSON) enthält nur Zeit, Client-ID, Tool, Ergebnis und Dauer.
+
+**Secret `LETTERFLOW_MCP_CLIENTS`:** JSON-Objekt `clientId -> token`.
+
+```
+LETTERFLOW_MCP_CLIENTS='{"agent-eins":"<token>","agent-zwei":"<token>"}'
+```
+
+- Client-ID: `^[a-z][a-z0-9-]{1,30}$`. Token: mindestens 32 zufällige Bytes, z. B. `openssl rand -hex 32`
+  (zu kurze oder gleichförmige Token, doppelte Token und kaputtes JSON machen die ganze Konfiguration ungültig;
+  der Endpunkt bleibt dann geschlossen).
+- **Tokenrotation:** neuen Eintrag mit neuem Token ergänzen, Secret setzen und neu starten, den Client umstellen,
+  danach den alten Eintrag entfernen. Jeder Client hat ein eigenes, unabhängig rotierbares Token.
+
+Beispielaufruf mit dem MCP-Client des SDK (Tools entdecken und aufrufen):
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+
+const client = new Client({ name: "beispiel", version: "1.0.0" })
+await client.connect(new StreamableHTTPClientTransport(new URL("https://<host>/api/mcp"), {
+  requestInit: { headers: { Authorization: `Bearer ${process.env.LETTERFLOW_MCP_TOKEN}` } },
+}))
+console.log((await client.listTools()).tools.map((t) => t.name))
+console.log(await client.callTool({ name: "letterflow_list_campaigns", arguments: { status: "active", limit: 10 } }))
+```
+
+`tests/mcp.test.ts` prüft Handshake, Tool-Aufruf und Authentifizierung mit genau diesem SDK-Client gegen den
+Handler. Andere Clients (z. B. ChatGPT) sind nicht getestet. Der Endpunkt gehört hinter HTTPS (Coolify/Proxy).
+
 ## Betrieb
 
 Container (`Dockerfile`), z. B. über Coolify. Die App braucht ausgehend: Supabase, Directus, Pingen, api.typesafe.ai.
