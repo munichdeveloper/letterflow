@@ -172,9 +172,8 @@ begin
     if v_lead.letter_pdf_sha256 is null or v_detail->>'pdf_sha256' is distinct from v_lead.letter_pdf_sha256 then
       raise exception 'letter approval must name the current PDF hash' using errcode = '22023';
     end if;
-    -- Regel 7: neueste Abwägung der Kampagne muss freigegeben sein. Die Sperre der Kampagne hält bis zum Ende der
-    -- Transaktion, damit kein Upload einer neueren Version zwischen Prüfung und Freigabe des Briefs fällt.
-    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('acq.interest_balancings:' || v_lead.campaign_id::text, 0));
+    -- Regel 7: neueste Abwägung der Kampagne muss freigegeben sein. acq.approved_interest_balancing nimmt die Sperre der
+    -- Kampagne bis zum Ende der Transaktion, damit kein Upload einer neueren Version dazwischen fällt.
     v_balancing := acq.approved_interest_balancing(v_lead.campaign_id);
     v_detail := v_detail || pg_catalog.jsonb_build_object('interest_balancing',
       pg_catalog.jsonb_build_object('id', v_balancing.id, 'version', v_balancing.version, 'sha256', v_balancing.sha256));
