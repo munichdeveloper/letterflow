@@ -105,7 +105,7 @@ Login je Person, weil jede Freigabe einem Menschen zugeordnet wird. Nutzer stehe
 ## MCP-Endpunkt
 
 `/api/mcp` ist ein geschützter MCP-Server (Streamable HTTP, zustandslos, Node-Runtime, offizielles
-`@modelcontextprotocol/sdk`). Er bietet bisher zwei Tools, nur lesend:
+`@modelcontextprotocol/sdk`). Er bietet fünf Tools (zwei lesend, drei schreibend bzw. startend):
 
 - `letterflow_list_campaigns` – Eingabe `{status?: "active"|"paused"|"closed", limit?: 1–100}`; Ausgabe je Kampagne
   nur `key`, `title`, `offer`, `segment`, `status`, `counts` (kein Brieftext, keine Interessenabwägung).
@@ -113,6 +113,20 @@ Login je Person, weil jede Freigabe einem Menschen zugeordnet wird. Nutzer stehe
   nur `company`, `domain`, `state`, `state_reason`, `latest_revision`, `approved_revision`, `evidence_count`,
   `letter_status`, `updated_at` (bei `domain` zusätzlich `requires_human_approval`). Keine Anschriften, Texte,
   PDF-Hashes oder Schlüssel; unbekannte Kampagne/Domain ergibt eine kontrollierte Fehlermeldung.
+- `letterflow_import_leads` – 1–50 recherchierte Leads mit Quellenbelegen importieren (Zustand `checked`, `rejected`
+  oder `suppressed`); gibt nichts frei.
+- `letterflow_import_proposals` – 1–50 Landingpage-/Briefvorschläge für bereits freigegebene Leads importieren.
+- `letterflow_run_pipeline` – Eingabe `{campaign: string}`; startet ausdrücklich die bestehende Kette (`runChain`).
+  Antwort nur `{started, status}` (`completed` oder `already_running`); Fehler ohne Details. Die kampagnenbezogene
+  Laufsperre bleibt maßgeblich: Bei aktivem Lauf wird kein zweiter gestartet. Das Tool gibt nichts frei, verarbeitet
+  nur bereits freigegebene Schritte, behält JEV-Grenze, PDF-Hash-Prüfung und Outbox-Idempotenz bei und sendet nur über
+  **Pingen Staging** (kein echter Postversand). Kein Verbinden, Auflisten, Statuslesen oder Importieren startet einen Lauf.
+
+**Ablauf mit den fünf Tools:** Kampagnen (`letterflow_list_campaigns`) → Lead-Import (`letterflow_import_leads`) →
+menschliche Freigabe der Leads in der Web-App (`approved`) → Vorschlagsimport (`letterflow_import_proposals`) →
+menschliche Seiten- und Brieffreigaben in der Web-App (`page_approved`, `letter_approved`) → expliziter Lauf
+(`letterflow_run_pipeline`); Fortschritt jeweils mit `letterflow_get_status`. Freigaben gibt es ausschließlich in der
+authentifizierten Web-App, nie per MCP.
 
 Jeder Request braucht `Authorization: Bearer <token>`; Web-Cookies gelten nicht. Ohne gültiges Token oder bei
 fehlender bzw. ungültiger Konfiguration antwortet der Endpunkt mit 401 bzw. 503, ohne die Datenbank anzufassen.
@@ -143,6 +157,9 @@ await client.connect(new StreamableHTTPClientTransport(new URL("https://<host>/a
 }))
 console.log((await client.listTools()).tools.map((t) => t.name))
 console.log(await client.callTool({ name: "letterflow_list_campaigns", arguments: { status: "active", limit: 10 } }))
+// Nach den menschlichen Freigaben, mit synthetischem Kampagnenschlüssel:
+console.log(await client.callTool({ name: "letterflow_run_pipeline", arguments: { campaign: "beispiel-kampagne" } }))
+// -> { started: true, status: "completed" } oder { started: false, status: "already_running" }
 ```
 
 `tests/mcp.test.ts` prüft Handshake, Tool-Aufruf und Authentifizierung mit genau diesem SDK-Client gegen den

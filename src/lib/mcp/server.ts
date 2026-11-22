@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { authenticateBearer, parseMcpClients } from "@/lib/mcp/clients"
-import { getStatusInput, getStatusTool, importLeadsInput, importLeadsTool, importProposalsInput, importProposalsTool, type ImportLeadsRunner, type ImportProposalsRunner, listCampaignsInput, listCampaignsTool, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
+import { getStatusInput, getStatusTool, importLeadsInput, importLeadsTool, importProposalsInput, importProposalsTool, type ImportLeadsRunner, type ImportProposalsRunner, listCampaignsInput, listCampaignsTool, runPipelineInput, runPipelineTool, type PipelineRunner, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
 
 export const MAX_BODY_BYTES = 64 * 1024
 export const TOOL_TIMEOUT_MS = 15_000
@@ -26,6 +26,8 @@ export type McpDeps = {
   importLeads?: ImportLeadsRunner
   /** Schreibender Vorschlagsimport; ruft im Betrieb importProposals(sqlAcqStore(db()), …) auf. Fehlt er, bleibt das Tool geschlossen. */
   importProposals?: ImportProposalsRunner
+  /** Expliziter Kettenlauf; ruft im Betrieb runChain(db(), campaign, process.env, log) auf. Fehlt er, bleibt das Tool geschlossen. */
+  runPipeline?: PipelineRunner
   audit?: (entry: AuditEntry) => void
   now?: () => Date
   toolTimeoutMs?: number
@@ -160,6 +162,33 @@ export function createMcpServer(clientId: string, deps: McpDeps) {
         done("error")
         return { isError: true, content: [{ type: "text" as const, text: "Der Import ist fehlgeschlagen." }] }
       }
+    },
+  )
+  server.registerTool(
+    "letterflow_run_pipeline",
+    {
+      title: "Pipeline starten",
+      description: "Startet die LetterFlow-Kette einer Kampagne ausdrücklich (runChain). Verarbeitet nur bereits menschlich freigegebene Schritte, gibt nichts frei, versendet nur über Pingen Staging. Läuft schon ein Lauf, wird kein zweiter gestartet (already_running).",
+      inputSchema: runPipelineInput,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async (input) => {
+      const started = Date.now()
+      const done = (result: "ok" | "error") =>
+        audit({ time: now().toISOString(), client: clientId, tool: "letterflow_run_pipeline", result, durationMs: Date.now() - started })
+      const run = deps.runPipeline
+      if (!run) {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: "Der Pipeline-Lauf ist nicht verfügbar." }] }
+      }
+      // Bewusst ohne Tool-Timeout: Ein Abbruch der Antwort würde den Lauf nicht stoppen; die Sperre läuft über runChain.
+      const out = await runPipelineTool(input, run)
+      if (!out.ok) {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: out.message }] }
+      }
+      done("ok")
+      return { content: [{ type: "text" as const, text: JSON.stringify(out.data) }], structuredContent: out.data }
     },
   )
   return server
