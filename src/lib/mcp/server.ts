@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { authenticateBearer, parseMcpClients } from "@/lib/mcp/clients"
-import { getStatusInput, getStatusTool, listCampaignsInput, listCampaignsTool, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
+import { getStatusInput, getStatusTool, importLeadsInput, importLeadsTool, type ImportLeadsRunner, listCampaignsInput, listCampaignsTool, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
 
 export const MAX_BODY_BYTES = 64 * 1024
 export const TOOL_TIMEOUT_MS = 15_000
@@ -22,6 +22,8 @@ export type McpDeps = {
   listCampaigns: () => Promise<CampaignRow[]>
   /** Lead-Übersicht einer Kampagne (nur lesend). */
   campaignLeads: (key: string) => Promise<LeadStatusRow[]>
+  /** Schreibender Import; ruft im Betrieb importLeads(sqlAcqStore(db()), …) auf. Fehlt er, bleibt das Tool geschlossen. */
+  importLeads?: ImportLeadsRunner
   audit?: (entry: AuditEntry) => void
   now?: () => Date
   toolTimeoutMs?: number
@@ -93,6 +95,37 @@ export function createMcpServer(clientId: string, deps: McpDeps) {
       } catch {
         done("error")
         return { isError: true, content: [{ type: "text" as const, text: "Der Status konnte nicht gelesen werden." }] }
+      }
+    },
+  )
+  server.registerTool(
+    "letterflow_import_leads",
+    {
+      title: "Leads importieren",
+      description: "Importiert 1–50 recherchierte Unternehmen mit Quellenbelegen in eine aktive Kampagne (Zustand checked, rejected oder suppressed). Startet keine Pipeline und gibt nichts frei. Bereits bekannte Domains werden als known gezählt.",
+      inputSchema: importLeadsInput,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const started = Date.now()
+      const done = (result: "ok" | "error") =>
+        audit({ time: now().toISOString(), client: clientId, tool: "letterflow_import_leads", result, durationMs: Date.now() - started })
+      const run = deps.importLeads
+      if (!run) {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: "Der Import ist nicht verfügbar." }] }
+      }
+      try {
+        const out = await withTimeout(importLeadsTool(input, clientId, run), deps.toolTimeoutMs ?? TOOL_TIMEOUT_MS)
+        if (!out.ok) {
+          done("error")
+          return { isError: true, content: [{ type: "text" as const, text: out.message }] }
+        }
+        done("ok")
+        return { content: [{ type: "text" as const, text: JSON.stringify(out.data) }], structuredContent: out.data }
+      } catch {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: "Der Import ist fehlgeschlagen." }] }
       }
     },
   )

@@ -1,5 +1,7 @@
 import { z } from "zod"
 import { STAGE_FOR_STATE } from "@/lib/approvals"
+import { LeadBatchSchema, LeadCandidateSchema, type LeadBatch } from "@/lib/acq/contracts"
+import { CLIENT_ID_PATTERN } from "@/lib/mcp/clients"
 
 export const CAMPAIGN_STATUSES = ["active", "paused", "closed"] as const
 export const DEFAULT_LIMIT = 50
@@ -115,5 +117,37 @@ export async function getStatusTool(input: GetStatusInput, loaders: GetStatusLoa
   return {
     ok: true,
     data: { campaign: input.campaign, total: leads.length, returned: Math.min(limit, leads.length), leads: leads.slice(0, limit).map(toPublicLeadStatus) },
+  }
+}
+
+/** Eingabe von letterflow_import_leads; `agent` gehört bewusst nicht dazu (kommt vom authentifizierten Client). */
+export const importLeadsInput = {
+  campaign: LeadBatchSchema.shape.campaign.describe("Kampagnenschlüssel."),
+  leads: z.array(LeadCandidateSchema).min(1).max(50).describe("1–50 Lead-Kandidaten mit Pflichtangaben und Quellenbelegen."),
+}
+export const importLeadsInputSchema = z.object(importLeadsInput)
+export type ImportLeadsInput = z.infer<typeof importLeadsInputSchema>
+
+export type ImportSummary = { checked: number; rejected: number; suppressed: number; known: number }
+export type ImportLeadsRunner = (batch: LeadBatch, log: (line: string) => void) => Promise<ImportSummary>
+
+export type ImportLeadsResult =
+  | { ok: true; data: ImportSummary }
+  | { ok: false; message: string }
+
+/**
+ * Baut den Batch serverseitig (agent = Client-ID, nie aus der Eingabe) und übergibt ihn an die
+ * bestehende Importfunktion. Roh-Logs werden verworfen, Fehlertexte nie durchgereicht.
+ */
+export async function importLeadsTool(input: unknown, clientId: string, run: ImportLeadsRunner): Promise<ImportLeadsResult> {
+  if (!CLIENT_ID_PATTERN.test(clientId)) return { ok: false, message: "Ungültige Client-ID." }
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const parsed = LeadBatchSchema.safeParse({ campaign: raw.campaign, agent: clientId, leads: raw.leads })
+  if (!parsed.success) return { ok: false, message: "Ungültige Eingabe: Kampagne, Pflichtangaben oder Belege der Leads (1–50) prüfen." }
+  try {
+    const s = await run(parsed.data, () => {})
+    return { ok: true, data: { checked: s.checked, rejected: s.rejected, suppressed: s.suppressed, known: s.known } }
+  } catch {
+    return { ok: false, message: "Der Import ist fehlgeschlagen (Kampagne unbekannt oder nicht aktiv)." }
   }
 }
