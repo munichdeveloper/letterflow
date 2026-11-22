@@ -7,7 +7,8 @@ import { handleMcpRequest, type McpDeps } from "@/lib/mcp/server"
 
 vi.mock("@/lib/server/db", () => ({ db: () => { throw new Error("keine Datenbank im Test") } }))
 
-const TOKEN_A = "aB3dE5gH7jK9mN1pQ3sT5vW7yZ0bC2eF4hJ6kL8nP0r"
+// Offensichtlicher Testwert, zur Laufzeit zusammengesetzt (mind. 43 Zeichen, mind. 10 verschiedene Zeichen).
+const TOKEN_A = "test-token-client-a-" + "0123456789".repeat(3)
 const CONFIG = JSON.stringify({ "client-a": TOKEN_A })
 const URL_ = "http://localhost/api/mcp"
 const NOW = "2026-11-20T10:00:00+01:00"
@@ -75,7 +76,8 @@ describe("letterflow_import_leads", () => {
     expect(s.leads.get("beispiel-vertrieb.example")!.state).toBe("checked")
     expect(s.actors).toEqual(["agent:client-a"])
     expect(s.run.mock.calls[0][0].agent).toBe("client-a")
-    expect(JSON.stringify(res)).not.toMatch(/Musterweg|Kaltakquise|TOKEN|aB3dE5/)
+    expect(JSON.stringify(res)).not.toMatch(/Musterweg|Kaltakquise|TOKEN/)
+    expect(JSON.stringify(res)).not.toContain(TOKEN_A)
   })
 
   it("zählt Wiederholungen als known und lässt Ablehnung und Sperre unverändert", async () => {
