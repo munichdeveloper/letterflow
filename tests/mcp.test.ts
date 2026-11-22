@@ -17,12 +17,19 @@ const ROWS: CampaignRow[] = [
   { key: "k-closed", title: "Beendet", offer: "dsb", segment: "Segment", status: "closed", interest_balancing_ref: null, letter: {}, counts: {} },
 ]
 
+const LEADS = Array.from({ length: 120 }, (_, i) => ({
+  id: `uuid-${i}`, company: `Firma ${i}`, domain: `firma${i}.example`, slug: `geheimer-slug-${i}`, state: i === 0 ? "letter_ready" : "discovered",
+  state_reason: null, updated_at: new Date("2026-01-01T00:00:00Z"), latest_revision: 1, approved_revision: null, evidence_count: 3,
+  letter_status: "draft", street: "Geheimstr. 1", letter_pdf_sha256: "deadbeef", research: "Recherchetext",
+}))
+
 function setup(overrides: Partial<McpDeps> = {}) {
   const listCampaigns = vi.fn(async () => ROWS)
+  const campaignLeads = vi.fn(async (_key: string) => LEADS)
   const audit: AuditEntry[] = []
-  const deps: McpDeps = { clientsConfig: CONFIG, listCampaigns, audit: (e) => audit.push(e), ...overrides }
+  const deps: McpDeps = { clientsConfig: CONFIG, listCampaigns, campaignLeads, audit: (e) => audit.push(e), ...overrides }
   const handler = (request: Request) => handleMcpRequest(request, deps)
-  return { listCampaigns, audit, handler }
+  return { listCampaigns, campaignLeads, audit, handler }
 }
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -95,7 +102,7 @@ describe("MCP-Handshake mit SDK-Client", () => {
     expect(client.getServerVersion()?.name).toBe("letterflow")
 
     const { tools } = await client.listTools()
-    expect(tools.map((t) => t.name)).toEqual(["letterflow_list_campaigns"])
+    expect(tools.map((t) => t.name)).toEqual(["letterflow_list_campaigns", "letterflow_get_status"])
     expect(listCampaigns).not.toHaveBeenCalled()
 
     const result = await client.callTool({ name: "letterflow_list_campaigns", arguments: {} })
@@ -273,5 +280,62 @@ describe("Ausgabe-Whitelist", () => {
   it("übernimmt keine weiteren Felder", () => {
     const out = toPublicCampaign({ ...ROWS[0], extra: "x" })
     expect(Object.keys(out).sort()).toEqual(["counts", "key", "offer", "segment", "status", "title"])
+  })
+})
+
+describe("letterflow_get_status", () => {
+  const SENSITIVE = ["Geheimstr", "deadbeef", "Recherchetext", "geheimer-slug", "uuid-", "GEHEIM-REF", "street", "slug", "sha256"]
+
+  it("liefert Kampagnenliste als Whitelist, begrenzt auf 100", async () => {
+    const { handler, campaignLeads } = setup()
+    const client = await connect(handler)
+    const result = await client.callTool({ name: "letterflow_get_status", arguments: { campaign: "k-active-1", limit: 100 } })
+    const data = result.structuredContent as { total: number; returned: number; leads: Record<string, unknown>[] }
+    expect(data.total).toBe(120)
+    expect(data.leads).toHaveLength(100)
+    expect(Object.keys(data.leads[0]).sort()).toEqual(
+      ["approved_revision", "company", "domain", "evidence_count", "latest_revision", "letter_status", "state", "state_reason", "updated_at"])
+    for (const word of SENSITIVE) expect(JSON.stringify(result)).not.toContain(word)
+    expect(campaignLeads).toHaveBeenCalledTimes(1)
+    const def = await client.callTool({ name: "letterflow_get_status", arguments: { campaign: "k-active-1" } })
+    expect((def.structuredContent as { leads: unknown[] }).leads).toHaveLength(50)
+  })
+
+  it("liefert einen Lead mit requires_human_approval", async () => {
+    const { handler } = setup()
+    const client = await connect(handler)
+    const result = await client.callTool({ name: "letterflow_get_status", arguments: { campaign: "k-active-1", domain: "firma0.example" } })
+    const lead = (result.structuredContent as { lead: Record<string, unknown> }).lead
+    expect(lead).toMatchObject({ company: "Firma 0", state: "letter_ready", requires_human_approval: true, updated_at: "2026-01-01T00:00:00.000Z" })
+    for (const word of SENSITIVE) expect(JSON.stringify(result)).not.toContain(word)
+  })
+
+  it("behandelt unbekannte Kampagne und Domain kontrolliert, ohne Leads zu laden", async () => {
+    const { handler, campaignLeads } = setup()
+    const client = await connect(handler)
+    const a = await client.callTool({ name: "letterflow_get_status", arguments: { campaign: "gibt-es-nicht" } })
+    expect(a.isError).toBe(true)
+    expect(campaignLeads).not.toHaveBeenCalled()
+    const b = await client.callTool({ name: "letterflow_get_status", arguments: { campaign: "k-active-1", domain: "nope.example" } })
+    expect(b.isError).toBe(true)
+  })
+
+  it.each([
+    [{}], [{ campaign: "" }], [{ campaign: "k", limit: 0 }], [{ campaign: "k", limit: 101 }], [{ campaign: "k", limit: 1.5 }],
+    [{ campaign: "k'; drop" }], [{ campaign: "k", domain: "a b" }],
+  ])("weist ungültige Eingabe ab: %j", async (args) => {
+    const { handler, campaignLeads } = setup()
+    const client = await connect(handler)
+    const outcome = await client.callTool({ name: "letterflow_get_status", arguments: args }).then((r) => r.isError === true, () => true)
+    expect(outcome).toBe(true)
+    expect(campaignLeads).not.toHaveBeenCalled()
+  })
+
+  it("weist ungültige Tokens ab, ohne die Datenbank anzufassen", async () => {
+    const { handler, campaignLeads, listCampaigns } = setup()
+    const response = await handler(post({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "letterflow_get_status", arguments: { campaign: "k-active-1" } } }, { authorization: "Bearer falsch" }))
+    expect(response.status).toBe(401)
+    expect(campaignLeads).not.toHaveBeenCalled()
+    expect(listCampaigns).not.toHaveBeenCalled()
   })
 })

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { authenticateBearer, parseMcpClients } from "@/lib/mcp/clients"
-import { listCampaignsInput, listCampaignsTool, type CampaignRow } from "@/lib/mcp/tools"
+import { getStatusInput, getStatusTool, listCampaignsInput, listCampaignsTool, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
 
 export const MAX_BODY_BYTES = 64 * 1024
 export const TOOL_TIMEOUT_MS = 15_000
@@ -20,6 +20,8 @@ export type McpDeps = {
   clientsConfig: string | undefined
   /** Datenbankabfrage; wird erst nach erfolgreicher Authentifizierung durch ein Tool aufgerufen. */
   listCampaigns: () => Promise<CampaignRow[]>
+  /** Lead-Übersicht einer Kampagne (nur lesend). */
+  campaignLeads: (key: string) => Promise<LeadStatusRow[]>
   audit?: (entry: AuditEntry) => void
   now?: () => Date
   toolTimeoutMs?: number
@@ -65,6 +67,32 @@ export function createMcpServer(clientId: string, deps: McpDeps) {
         // Keine Fehlermeldung der Datenbank weitergeben (kann Verbindungsdaten enthalten).
         done("error")
         return { isError: true, content: [{ type: "text" as const, text: "Die Kampagnenliste konnte nicht gelesen werden." }] }
+      }
+    },
+  )
+  server.registerTool(
+    "letterflow_get_status",
+    {
+      title: "Status abfragen",
+      description: "Status einer Kampagne (Leads mit Zustand, Revisionen, Belegzahl, Briefstatus) oder eines Leads (mit domain). Nur lesend, nur freigegebene Metadaten.",
+      inputSchema: getStatusInput,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const started = Date.now()
+      const done = (result: "ok" | "error") =>
+        audit({ time: now().toISOString(), client: clientId, tool: "letterflow_get_status", result, durationMs: Date.now() - started })
+      try {
+        const out = await withTimeout(getStatusTool(input, deps), deps.toolTimeoutMs ?? TOOL_TIMEOUT_MS)
+        if (!out.ok) {
+          done("error")
+          return { isError: true, content: [{ type: "text" as const, text: out.message }] }
+        }
+        done("ok")
+        return { content: [{ type: "text" as const, text: JSON.stringify(out.data) }], structuredContent: out.data }
+      } catch {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: "Der Status konnte nicht gelesen werden." }] }
       }
     },
   )
