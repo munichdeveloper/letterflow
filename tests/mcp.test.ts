@@ -106,7 +106,7 @@ describe("MCP-Handshake mit SDK-Client", () => {
     expect(client.getServerVersion()?.name).toBe("letterflow")
 
     const { tools } = await client.listTools()
-    expect(tools.map((t) => t.name)).toEqual(["letterflow_list_campaigns", "letterflow_get_status"])
+    expect(tools.map((t) => t.name)).toEqual(["letterflow_list_campaigns", "letterflow_get_status", "letterflow_import_leads"])
     expect(listCampaigns).not.toHaveBeenCalled()
 
     const result = await client.callTool({ name: "letterflow_list_campaigns", arguments: {} })
