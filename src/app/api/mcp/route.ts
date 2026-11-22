@@ -1,5 +1,5 @@
 import { handleMcpRequest } from "@/lib/mcp/server"
-import { importLeads } from "@/lib/acq/pipeline"
+import { importLeads, importProposals } from "@/lib/acq/pipeline"
 import { sqlAcqStore } from "@/lib/acq/store"
 import { db } from "@/lib/server/db"
 import { campaignLeads, listCampaigns } from "@/lib/server/queries"
@@ -14,6 +14,7 @@ const handle = (request: Request) =>
     listCampaigns,
     campaignLeads,
     importLeads: (batch, log) => importLeads(sqlAcqStore(db()), batch, log),
+    importProposals: (batch, log) => importProposals(sqlAcqStore(db()), batch, log),
   })
 
 export const POST = handle

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { STAGE_FOR_STATE } from "@/lib/approvals"
-import { LeadBatchSchema, LeadCandidateSchema, type LeadBatch } from "@/lib/acq/contracts"
+import { LeadBatchSchema, LeadCandidateSchema, ProposalBatchSchema, ProposalSchema, type LeadBatch, type ProposalBatch } from "@/lib/acq/contracts"
 import { CLIENT_ID_PATTERN } from "@/lib/mcp/clients"
 
 export const CAMPAIGN_STATUSES = ["active", "paused", "closed"] as const
@@ -149,5 +149,40 @@ export async function importLeadsTool(input: unknown, clientId: string, run: Imp
     return { ok: true, data: { checked: s.checked, rejected: s.rejected, suppressed: s.suppressed, known: s.known } }
   } catch {
     return { ok: false, message: "Der Import ist fehlgeschlagen (Kampagne unbekannt oder nicht aktiv)." }
+  }
+}
+
+/** Eingabe von letterflow_import_proposals; `agent` gehört bewusst nicht dazu (kommt vom authentifizierten Client). */
+export const importProposalsInput = {
+  campaign: ProposalBatchSchema.shape.campaign.describe("Kampagnenschlüssel."),
+  proposals: z
+    .array(ProposalSchema.extend({ domain: z.string().min(1).max(253).regex(/^[A-Za-z0-9.-]+$/) }))
+    .min(1)
+    .max(50)
+    .describe("1–50 Landingpage- und Briefvorschläge je Domain eines bereits freigegebenen Leads."),
+}
+export const importProposalsInputSchema = z.object(importProposalsInput)
+
+export type ProposalSummary = { stored: number; unchanged: number; refused: number }
+export type ImportProposalsRunner = (batch: ProposalBatch, log: (line: string) => void) => Promise<ProposalSummary>
+
+export type ImportProposalsResult =
+  | { ok: true; data: ProposalSummary }
+  | { ok: false; message: string }
+
+/**
+ * Baut den Batch serverseitig (agent = Client-ID, nie aus der Eingabe) und übergibt ihn an
+ * importProposals. Roh-Logs (enthalten Zustände und Belegprobleme) werden verworfen.
+ */
+export async function importProposalsTool(input: unknown, clientId: string, run: ImportProposalsRunner): Promise<ImportProposalsResult> {
+  if (!CLIENT_ID_PATTERN.test(clientId)) return { ok: false, message: "Ungültige Client-ID." }
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const parsed = ProposalBatchSchema.safeParse({ campaign: raw.campaign, agent: clientId, proposals: raw.proposals })
+  if (!parsed.success) return { ok: false, message: "Ungültige Eingabe: Kampagne oder Vorschläge (1–50, Feldgrenzen) prüfen." }
+  try {
+    const s = await run(parsed.data, () => {})
+    return { ok: true, data: { stored: s.stored, unchanged: s.unchanged, refused: s.refused } }
+  } catch {
+    return { ok: false, message: "Der Import ist fehlgeschlagen (Kampagne unbekannt oder Daten ungültig)." }
   }
 }

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { authenticateBearer, parseMcpClients } from "@/lib/mcp/clients"
-import { getStatusInput, getStatusTool, importLeadsInput, importLeadsTool, type ImportLeadsRunner, listCampaignsInput, listCampaignsTool, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
+import { getStatusInput, getStatusTool, importLeadsInput, importLeadsTool, importProposalsInput, importProposalsTool, type ImportLeadsRunner, type ImportProposalsRunner, listCampaignsInput, listCampaignsTool, type CampaignRow, type LeadStatusRow } from "@/lib/mcp/tools"
 
 export const MAX_BODY_BYTES = 64 * 1024
 export const TOOL_TIMEOUT_MS = 15_000
@@ -24,6 +24,8 @@ export type McpDeps = {
   campaignLeads: (key: string) => Promise<LeadStatusRow[]>
   /** Schreibender Import; ruft im Betrieb importLeads(sqlAcqStore(db()), …) auf. Fehlt er, bleibt das Tool geschlossen. */
   importLeads?: ImportLeadsRunner
+  /** Schreibender Vorschlagsimport; ruft im Betrieb importProposals(sqlAcqStore(db()), …) auf. Fehlt er, bleibt das Tool geschlossen. */
+  importProposals?: ImportProposalsRunner
   audit?: (entry: AuditEntry) => void
   now?: () => Date
   toolTimeoutMs?: number
@@ -117,6 +119,37 @@ export function createMcpServer(clientId: string, deps: McpDeps) {
       }
       try {
         const out = await withTimeout(importLeadsTool(input, clientId, run), deps.toolTimeoutMs ?? TOOL_TIMEOUT_MS)
+        if (!out.ok) {
+          done("error")
+          return { isError: true, content: [{ type: "text" as const, text: out.message }] }
+        }
+        done("ok")
+        return { content: [{ type: "text" as const, text: JSON.stringify(out.data) }], structuredContent: out.data }
+      } catch {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: "Der Import ist fehlgeschlagen." }] }
+      }
+    },
+  )
+  server.registerTool(
+    "letterflow_import_proposals",
+    {
+      title: "Vorschläge importieren",
+      description: "Übergibt 1–50 Landingpage- und Briefvorschläge (je Domain) für bereits menschlich freigegebene Leads. Gezählt wird stored, unchanged oder refused. Erzeugt keine Seiten, baut keine PDFs, startet keine Pipeline und gibt nichts frei.",
+      inputSchema: importProposalsInput,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const started = Date.now()
+      const done = (result: "ok" | "error") =>
+        audit({ time: now().toISOString(), client: clientId, tool: "letterflow_import_proposals", result, durationMs: Date.now() - started })
+      const run = deps.importProposals
+      if (!run) {
+        done("error")
+        return { isError: true, content: [{ type: "text" as const, text: "Der Import ist nicht verfügbar." }] }
+      }
+      try {
+        const out = await withTimeout(importProposalsTool(input, clientId, run), deps.toolTimeoutMs ?? TOOL_TIMEOUT_MS)
         if (!out.ok) {
           done("error")
           return { isError: true, content: [{ type: "text" as const, text: out.message }] }
