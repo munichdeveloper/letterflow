@@ -35,13 +35,13 @@ describe("Kampagnenformular", () => {
     const fields: Record<string, string> = {
       key: "dsb-akquiseagenturen-2026-11", title: "DSB: Akquiseagenturen", offer: "dsb", segment: "Akquiseagenturen (GmbH/UG/AG)",
       sender: "Absender · Straße 1 · 80331 München", place: "München", qrText: "Scannen Sie den QR-Code.",
-      signature: "Max Muster\r\nFirma · www.example.de\n", footer: "Werbung von … Widerspruch genügt formlos.", interestBalancingRef: "",
+      signature: "Max Muster\r\nFirma · www.example.de\n", footer: "Werbung von … Widerspruch genügt formlos.", interestBalancingRef: "altes Freitextfeld",
     }
     for (const [k, v] of Object.entries(fields)) form.set(k, v)
     const input = campaignFromForm(form)
     expect(input.letter.signature).toEqual(["Max Muster", "Firma · www.example.de"])
     expect(input.letter.salutation).toBe("Sehr geehrte Damen und Herren,")
-    expect(input.interestBalancingRef).toBeNull()
+    expect(input).not.toHaveProperty("interestBalancingRef")
     expect(input.status).toBe("active")
     form.set("key", "Mit Leerzeichen")
     expect(() => campaignFromForm(form)).toThrow()
