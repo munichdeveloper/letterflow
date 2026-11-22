@@ -31,7 +31,7 @@ jobs:
       deployments: write
       actions: read
     steps:
-      - uses: munichdeveloper/software-factory@cd93ccc5f61206bcdd3951a91019a6e933887a98
+      - uses: munichdeveloper/software-factory@d19020ff7f7273a557d3346f3c52ad4a9c329010
         with:
           mode: deploy
           dry-run: ${{ inputs.dry_run || false }}
