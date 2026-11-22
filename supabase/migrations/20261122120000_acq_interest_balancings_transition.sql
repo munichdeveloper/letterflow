@@ -133,3 +133,11 @@ begin
   values (p_lead_id, v_prev, v_to, p_actor, v_detail || pg_catalog.jsonb_build_object('reason', v_reason));
   return v_lead;
 end $$;
+
+-- Rechte wie in 20261121100000 und im Kern: create or replace lässt bestehende Rechte stehen, legt eine fehlende Funktion
+-- aber mit EXECUTE für PUBLIC an. Deshalb hier ausdrücklich setzen.
+revoke all on function acq.approve_interest_balancing(uuid, text, text) from public, anon, authenticated;
+grant execute on function acq.approve_interest_balancing(uuid, text, text) to bos_automation;
+revoke all on function acq.approved_interest_balancing(uuid) from public, anon, authenticated;
+revoke all on function acq.transition(uuid, text, text, text, jsonb) from public, anon, authenticated;
+grant execute on function acq.transition(uuid, text, text, text, jsonb) to bos_automation;

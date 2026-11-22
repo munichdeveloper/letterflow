@@ -191,10 +191,12 @@ describe.skipIf(!pg)("Interessenabwägung in der Datenbank (Regel 7)", () => {
 
   it("anon und authenticated haben keine Rechte", async () => {
     for (const role of ["anon", "authenticated"]) {
-      const [rights] = await db.admin<{ tbl: boolean; fn: boolean }[]>`
+      const [rights] = await db.admin<{ tbl: boolean; fn: boolean; latest: boolean; transition: boolean }[]>`
         select has_table_privilege(${role}, 'acq.interest_balancings', 'select,insert,update,delete') as tbl,
-               has_function_privilege(${role}, 'acq.approve_interest_balancing(uuid, text, text)', 'execute') as fn`
-      expect(rights).toEqual({ tbl: false, fn: false })
+               has_function_privilege(${role}, 'acq.approve_interest_balancing(uuid, text, text)', 'execute') as fn,
+               has_function_privilege(${role}, 'acq.approved_interest_balancing(uuid)', 'execute') as latest,
+               has_function_privilege(${role}, 'acq.transition(uuid, text, text, text, jsonb)', 'execute') as transition`
+      expect(rights).toEqual({ tbl: false, fn: false, latest: false, transition: false })
     }
   })
 })
