@@ -186,3 +186,33 @@ export async function importProposalsTool(input: unknown, clientId: string, run:
     return { ok: false, message: "Der Import ist fehlgeschlagen (Kampagne unbekannt oder Daten ungültig)." }
   }
 }
+
+/** Eingabe von letterflow_run_pipeline. */
+export const runPipelineInput = {
+  campaign: getStatusInput.campaign,
+}
+export const runPipelineInputSchema = z.object(runPipelineInput)
+
+export type PipelineRunner = (campaign: string) => Promise<{ ran: boolean; lines?: string[] }>
+
+export type RunPipelineResult =
+  | { ok: true; data: { started: boolean; status: "completed" | "already_running" } }
+  | { ok: false; message: string }
+
+/**
+ * Startet die bestehende Kette (runChain) für genau eine Kampagne. Die Laufsperre liegt in runChain.
+ * Roh-Logs und Fehlertexte werden verworfen; es gibt keine Freigabe- oder Zustandsänderung durch das Tool.
+ */
+export async function runPipelineTool(input: unknown, run: PipelineRunner): Promise<RunPipelineResult> {
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const parsed = runPipelineInputSchema.safeParse({ campaign: raw.campaign })
+  if (!parsed.success) return { ok: false, message: "Ungültige Eingabe: Kampagnenschlüssel prüfen." }
+  try {
+    const result = await run(parsed.data.campaign)
+    return result.ran
+      ? { ok: true, data: { started: true, status: "completed" } }
+      : { ok: true, data: { started: false, status: "already_running" } }
+  } catch {
+    return { ok: false, message: "Der Pipeline-Lauf ist fehlgeschlagen (Kampagne unbekannt oder Konfiguration unvollständig)." }
+  }
+}
