@@ -19,6 +19,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+        env:
+          # Datenbank-Tests (tests/interest-balancing-db.test.ts) laufen gegen das vorinstallierte Postgres des Runners
+          # und dürfen hier nicht still übersprungen werden.
+          ACQ_TEST_DATABASE_REQUIRED: "1"
       - run: npm run build
 
   docker:

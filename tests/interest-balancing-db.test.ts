@@ -119,6 +119,23 @@ describe.skipIf(!pg)("Interessenabwägung in der Datenbank (Regel 7)", () => {
     expect(lead.state).toBe("letter_ready")
   })
 
+  it("Brieffreigabe wartet auf einen gleichzeitigen Upload und prüft gegen die neue Version", async () => {
+    await createCampaign(app, "beispiel-gleichzeitig")
+    const lead = await letterReadyLead(app, "beispiel-gleichzeitig", "beispiel-vier.de")
+    const v1 = await saveInterestBalancing("beispiel-gleichzeitig", await upload("v1.md", "# Abwägung v1"), ACTOR, app)
+    await approveInterestBalancing("beispiel-gleichzeitig", v1.id, v1.sha256, ACTOR, app)
+    const v2 = new TextEncoder().encode("# Abwägung v2")
+    let approval: Promise<unknown> | undefined
+    await db.admin.begin(async (tx) => {
+      // Upload von v2 hält die Sperre der Kampagne bis zum Commit
+      await tx`insert into acq.interest_balancings (campaign_id, file_name, content_type, content, sha256, uploaded_by)
+               select id, 'v2.md', 'text/markdown; charset=utf-8', ${v2}, ${sha256(v2)}, ${ACTOR} from acq.campaigns where key = 'beispiel-gleichzeitig'`
+      approval = approveLetter(app, lead).then(() => "freigegeben", (error: Error) => error.message)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    expect(await approval).toMatch(/v2 is not approved/)
+  })
+
   it("leere interest_balancing_ref blockiert nicht, wenn die neueste Version freigegeben ist", async () => {
     await createCampaign(app, "beispiel-ohne-ref")
     const lead = await letterReadyLead(app, "beispiel-ohne-ref", "beispiel-drei.de")
