@@ -54,6 +54,9 @@ npm run acq -- status <kampagne>          # Zustand aller Leads (acq.lead_overvi
 
 Freigaben gibt es auf der Befehlszeile bewusst nicht: Die gibt nur ein Mensch in der App.
 
+Leads und Seitentexte liefert ein Agent mit dem Skill `.claude/skills/b2b-postal-acquisition` (Recherche,
+Belege, Dateiformate). Seine Dateien liegen unter `data/<kampagne>/` und werden nie committet.
+
 Umgebungsvariablen (App und Befehlszeile):
 
 - `ACQ_DATABASE_URL` (und bei Bedarf `ACQ_DATABASE_CA_CERT`): Business-OS-Datenbank, Rolle `bos_automation`.
