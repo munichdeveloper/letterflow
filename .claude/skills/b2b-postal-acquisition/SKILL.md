@@ -36,8 +36,12 @@ Kampagnendaten dabei sind. Beispiele in Code und Tests sind immer erfunden (Beis
    - `robots.txt` der Domain: erlaubt sie das Lesen von Startseite, Leistungsseite und Impressum? → `robotsAllowed`
    - Impressum: Rechtsform (nur GmbH, UG, AG), Geschäftsanschrift, **Werbewiderspruch** („Widerspruch gegen
      Werbung“, „keine Werbung“ o. ä.) → `advertisingObjection`
-   - Firmenname mit Personennamen (z. B. „Müller Vertrieb GmbH“) → `personNameInCompany: true`
-   - Erkennbare Ein-Personen-Gesellschaft (Website spricht nur von „ich“, Team = eine Person) → `singlePersonCompany: true`
+   - Firmenname mit Personennamen (z. B. „Müller Vertrieb GmbH“) oder erkennbare Ein-Personen-Gesellschaft
+     (Website spricht nur von „ich“, Team = eine Person): **gar nicht in die Datei schreiben.** Der Import
+     speichert Firma und Belege, bevor die Regeln prüfen, und eine spätere Ablehnung löscht sie nicht. Solche
+     Kandidaten nur zählen und im Ergebnis die Anzahl melden, ohne Namen. In der Datei stehen
+     `personNameInCompany` und `singlePersonCompany` daher immer auf `false`; die Regeln prüfen den Firmennamen
+     trotzdem noch einmal.
    - Belege: je Aussage `ref`, `kind` (`fact` nur wenn wörtlich belegbar, sonst `hypothesis`), `claim`,
      `sourceUrl` (https), kurzes `quote`, `retrievedAt` (ISO mit Zeitzone). Mindestens ein Fakt von der eigenen Domain.
    - Seiten schonen: wenige Abrufe je Firma, keine Unterseiten-Crawls.
@@ -53,7 +57,9 @@ Kampagnendaten dabei sind. Beispiele in Code und Tests sind immer erfunden (Beis
    der Bitte, die Leads in der App freizugeben.
 
 ## 2. Seitenbeschreibung + Brief (nach Freigabe des Leads)
-Nur für Leads im Zustand `approved` oder später (dann entsteht eine neue Revision, alte Freigaben fallen weg).
+Nur für Leads in den Zuständen `approved`, `researched`, `page_ready`, `page_approved`, `letter_ready` oder
+`letter_approved` (ab `page_ready` entsteht eine neue Revision, alte Freigaben fallen weg). Leads in `queued`,
+`sent`, `rejected`, `suppressed` oder `failed` nimmt der Import nicht an; vorher mit `status` prüfen.
 - `slug`: kurz, aus dem Firmennamen, ohne Rechtsform (`beispiel-vertrieb`).
 - `page.headline` (≤ 90), `page.intro` (≤ 400), `page.observations` (1–3, je mit `evidenceRef`; Hypothesen
   **nur als Frage** mit „?“ am Ende), `page.proposal` (Angebot `dsb`: 1–4 Punkte, was konkret umgesetzt würde,
@@ -74,7 +80,11 @@ Seiten in Directus an (`page_ready`), baut nach Seitenfreigabe die Brief-PDFs (`
 Pro Kampagne läuft höchstens ein Lauf gleichzeitig. Danach `npm run acq -- status <kampagne>` und melden, was
 auf eine Freigabe in der App wartet.
 
-Bei `failed`: Grund in `state_reason`; nach Behebung setzt ein Mensch den Lead in der App mit „Weitermachen“ zurück, danach Kette erneut anstoßen.
+Bei `failed`: Grund in `state_reason` melden. „Weitermachen“ in der App gibt es nur, wenn der Lead nicht in
+eine Freigabestufe zurück müsste (zum Beispiel nach einem Directus-Fehler beim Seitenaufbau, zurück nach
+`researched`). Ist ein Lead aus `page_approved` oder `letter_approved` gescheitert (Brief-PDF, Jev-Ausfall,
+Upload), bietet die App keinen Wiederanlauf: dann nur den Grund melden und die Klärung Johannes überlassen,
+nichts per SQL zurücksetzen.
 
 Umgebung: `ACQ_DATABASE_URL`; für `run` zusätzlich `DIRECTUS_SETUP_TOKEN`, `PINGEN_CLIENT_ID`,
 `PINGEN_CLIENT_SECRET` (Staging) und `TYPESAFE_API_KEY`. Übrige Einstellungen kommen aus **Systeme** in der App.
