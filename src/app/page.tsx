@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { Shell } from "@/components/shell"
 import { STATE_LABELS, WAITING_FOR_HUMAN } from "@/lib/campaigns"
+import { interestBalancingLabel, isInterestBalancingApproved } from "@/lib/interest-balancing"
 import { listCampaigns } from "@/lib/server/queries"
 import { requireUser } from "@/lib/server/session"
 
@@ -26,7 +27,9 @@ export default async function CampaignsPage() {
               <div className="muted">{c.key} · Angebot {c.offer} · {c.status}</div>
               <p>{c.segment}</p>
               <div>{total} Leads{waiting ? <span className="warn"> · {waiting} warten auf Freigabe</span> : null}</div>
-              {!c.interest_balancing_ref && <div className="bad">Interessenabwägung fehlt: keine Brieffreigabe möglich</div>}
+              {isInterestBalancingApproved(c.interest_balancing)
+                ? <div className="muted">{interestBalancingLabel(c.interest_balancing)}</div>
+                : <div className="bad">{interestBalancingLabel(c.interest_balancing)}: keine Brieffreigabe möglich</div>}
               <div className="pills">
                 {Object.entries(c.counts).map(([state, n]) => (
                   <span key={state} className={`pill${WAITING_FOR_HUMAN.includes(state) ? " wait" : ""}`}>{STATE_LABELS[state] ?? state}: {n}</span>

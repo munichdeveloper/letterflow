@@ -1,0 +1,218 @@
+import { z } from "zod"
+import { STAGE_FOR_STATE } from "@/lib/approvals"
+import { LeadBatchSchema, LeadCandidateSchema, ProposalBatchSchema, ProposalSchema, type LeadBatch, type ProposalBatch } from "@/lib/acq/contracts"
+import { CLIENT_ID_PATTERN } from "@/lib/mcp/clients"
+
+export const CAMPAIGN_STATUSES = ["active", "paused", "closed"] as const
+export const DEFAULT_LIMIT = 50
+export const MAX_LIMIT = 100
+
+/** Eingabe von letterflow_list_campaigns (als Form für registerTool). */
+export const listCampaignsInput = {
+  status: z.enum(CAMPAIGN_STATUSES).optional().describe("Nur Kampagnen mit diesem Status."),
+  limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe(`Höchstzahl Kampagnen (1–${MAX_LIMIT}, Standard ${DEFAULT_LIMIT}).`),
+}
+export const listCampaignsInputSchema = z.object(listCampaignsInput)
+export type ListCampaignsInput = z.infer<typeof listCampaignsInputSchema>
+
+/** Was die Abfrage liefert; Felder wie letter und interest_balancing_ref kommen nie in die Ausgabe. */
+export type CampaignRow = {
+  key: string
+  title: string
+  offer: string
+  segment: string
+  status: string
+  counts: Record<string, number>
+  [extra: string]: unknown
+}
+
+export type PublicCampaign = Pick<CampaignRow, "key" | "title" | "offer" | "segment" | "status" | "counts">
+
+/** Ausgabe-Whitelist: genau diese Felder, nie `...row`. */
+export function toPublicCampaign(row: CampaignRow): PublicCampaign {
+  const counts: Record<string, number> = {}
+  for (const [state, n] of Object.entries(row.counts ?? {})) if (typeof n === "number") counts[state] = n
+  return { key: row.key, title: row.title, offer: row.offer, segment: row.segment, status: row.status, counts }
+}
+
+export async function listCampaignsTool(input: ListCampaignsInput, load: () => Promise<CampaignRow[]>) {
+  const rows = await load()
+  const filtered = input.status ? rows.filter((row) => row.status === input.status) : rows
+  const campaigns = filtered.slice(0, input.limit ?? DEFAULT_LIMIT).map(toPublicCampaign)
+  return { campaigns }
+}
+
+/** Eingabe von letterflow_get_status. */
+export const getStatusInput = {
+  campaign: z.string().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).describe("Kampagnenschlüssel."),
+  domain: z.string().min(1).max(253).regex(/^[A-Za-z0-9.-]+$/).optional().describe("Domain eines Leads; ohne Angabe wird die Kampagnenliste geliefert."),
+  limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe(`Nur Kampagnenliste: Höchstzahl Leads (1–${MAX_LIMIT}, Standard ${DEFAULT_LIMIT}).`),
+}
+export const getStatusInputSchema = z.object(getStatusInput)
+export type GetStatusInput = z.infer<typeof getStatusInputSchema>
+
+/** Zeile der Lead-Übersicht; weitere Felder (Slug, id, …) werden nie ausgegeben. */
+export type LeadStatusRow = {
+  company: string
+  domain: string
+  state: string
+  state_reason: string | null
+  latest_revision: number | null
+  approved_revision: number | null
+  evidence_count: number
+  letter_status: string | null
+  updated_at: Date | string
+  [extra: string]: unknown
+}
+
+export type PublicLeadStatus = {
+  company: string
+  domain: string
+  state: string
+  state_reason: string | null
+  latest_revision: number | null
+  approved_revision: number | null
+  evidence_count: number
+  letter_status: string | null
+  updated_at: string
+}
+
+export function toPublicLeadStatus(row: LeadStatusRow): PublicLeadStatus {
+  const updated = row.updated_at instanceof Date ? row.updated_at : new Date(row.updated_at)
+  return {
+    company: row.company,
+    domain: row.domain,
+    state: row.state,
+    state_reason: row.state_reason ?? null,
+    latest_revision: row.latest_revision ?? null,
+    approved_revision: row.approved_revision ?? null,
+    evidence_count: Number(row.evidence_count) || 0,
+    letter_status: row.letter_status ?? null,
+    updated_at: Number.isNaN(updated.getTime()) ? "" : updated.toISOString(),
+  }
+}
+
+export type GetStatusLoaders = {
+  listCampaigns: () => Promise<CampaignRow[]>
+  campaignLeads: (key: string) => Promise<LeadStatusRow[]>
+}
+
+export type GetStatusResult =
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; message: string }
+
+/** Nur lesend: ausschließlich die beiden Loader, keine Zustandsänderung, kein Provider. */
+export async function getStatusTool(input: GetStatusInput, loaders: GetStatusLoaders): Promise<GetStatusResult> {
+  const campaigns = await loaders.listCampaigns()
+  if (!campaigns.some((c) => c.key === input.campaign)) return { ok: false, message: "Unbekannte Kampagne." }
+  const leads = await loaders.campaignLeads(input.campaign)
+  if (input.domain !== undefined) {
+    const domain = input.domain.toLowerCase()
+    const row = leads.find((l) => String(l.domain).toLowerCase() === domain)
+    if (!row) return { ok: false, message: "Unbekannte Domain in dieser Kampagne." }
+    const lead = toPublicLeadStatus(row)
+    return { ok: true, data: { campaign: input.campaign, lead: { ...lead, requires_human_approval: STAGE_FOR_STATE[lead.state] !== undefined } } }
+  }
+  const limit = input.limit ?? DEFAULT_LIMIT
+  return {
+    ok: true,
+    data: { campaign: input.campaign, total: leads.length, returned: Math.min(limit, leads.length), leads: leads.slice(0, limit).map(toPublicLeadStatus) },
+  }
+}
+
+/** Eingabe von letterflow_import_leads; `agent` gehört bewusst nicht dazu (kommt vom authentifizierten Client). */
+export const importLeadsInput = {
+  campaign: LeadBatchSchema.shape.campaign.describe("Kampagnenschlüssel."),
+  leads: z.array(LeadCandidateSchema).min(1).max(50).describe("1–50 Lead-Kandidaten mit Pflichtangaben und Quellenbelegen."),
+}
+export const importLeadsInputSchema = z.object(importLeadsInput)
+export type ImportLeadsInput = z.infer<typeof importLeadsInputSchema>
+
+export type ImportSummary = { checked: number; rejected: number; suppressed: number; known: number }
+export type ImportLeadsRunner = (batch: LeadBatch, log: (line: string) => void) => Promise<ImportSummary>
+
+export type ImportLeadsResult =
+  | { ok: true; data: ImportSummary }
+  | { ok: false; message: string }
+
+/**
+ * Baut den Batch serverseitig (agent = Client-ID, nie aus der Eingabe) und übergibt ihn an die
+ * bestehende Importfunktion. Roh-Logs werden verworfen, Fehlertexte nie durchgereicht.
+ */
+export async function importLeadsTool(input: unknown, clientId: string, run: ImportLeadsRunner): Promise<ImportLeadsResult> {
+  if (!CLIENT_ID_PATTERN.test(clientId)) return { ok: false, message: "Ungültige Client-ID." }
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const parsed = LeadBatchSchema.safeParse({ campaign: raw.campaign, agent: clientId, leads: raw.leads })
+  if (!parsed.success) return { ok: false, message: "Ungültige Eingabe: Kampagne, Pflichtangaben oder Belege der Leads (1–50) prüfen." }
+  try {
+    const s = await run(parsed.data, () => {})
+    return { ok: true, data: { checked: s.checked, rejected: s.rejected, suppressed: s.suppressed, known: s.known } }
+  } catch {
+    return { ok: false, message: "Der Import ist fehlgeschlagen (Kampagne unbekannt oder nicht aktiv)." }
+  }
+}
+
+/** Eingabe von letterflow_import_proposals; `agent` gehört bewusst nicht dazu (kommt vom authentifizierten Client). */
+export const importProposalsInput = {
+  campaign: ProposalBatchSchema.shape.campaign.describe("Kampagnenschlüssel."),
+  proposals: z
+    .array(ProposalSchema.extend({ domain: z.string().min(1).max(253).regex(/^[A-Za-z0-9.-]+$/) }))
+    .min(1)
+    .max(50)
+    .describe("1–50 Landingpage- und Briefvorschläge je Domain eines bereits freigegebenen Leads."),
+}
+export const importProposalsInputSchema = z.object(importProposalsInput)
+
+export type ProposalSummary = { stored: number; unchanged: number; refused: number }
+export type ImportProposalsRunner = (batch: ProposalBatch, log: (line: string) => void) => Promise<ProposalSummary>
+
+export type ImportProposalsResult =
+  | { ok: true; data: ProposalSummary }
+  | { ok: false; message: string }
+
+/**
+ * Baut den Batch serverseitig (agent = Client-ID, nie aus der Eingabe) und übergibt ihn an
+ * importProposals. Roh-Logs (enthalten Zustände und Belegprobleme) werden verworfen.
+ */
+export async function importProposalsTool(input: unknown, clientId: string, run: ImportProposalsRunner): Promise<ImportProposalsResult> {
+  if (!CLIENT_ID_PATTERN.test(clientId)) return { ok: false, message: "Ungültige Client-ID." }
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const parsed = ProposalBatchSchema.safeParse({ campaign: raw.campaign, agent: clientId, proposals: raw.proposals })
+  if (!parsed.success) return { ok: false, message: "Ungültige Eingabe: Kampagne oder Vorschläge (1–50, Feldgrenzen) prüfen." }
+  try {
+    const s = await run(parsed.data, () => {})
+    return { ok: true, data: { stored: s.stored, unchanged: s.unchanged, refused: s.refused } }
+  } catch {
+    return { ok: false, message: "Der Import ist fehlgeschlagen (Kampagne unbekannt oder Daten ungültig)." }
+  }
+}
+
+/** Eingabe von letterflow_run_pipeline. */
+export const runPipelineInput = {
+  campaign: getStatusInput.campaign,
+}
+export const runPipelineInputSchema = z.object(runPipelineInput)
+
+export type PipelineRunner = (campaign: string) => Promise<{ ran: boolean; lines?: string[] }>
+
+export type RunPipelineResult =
+  | { ok: true; data: { started: boolean; status: "completed" | "already_running" } }
+  | { ok: false; message: string }
+
+/**
+ * Startet die bestehende Kette (runChain) für genau eine Kampagne. Die Laufsperre liegt in runChain.
+ * Roh-Logs und Fehlertexte werden verworfen; es gibt keine Freigabe- oder Zustandsänderung durch das Tool.
+ */
+export async function runPipelineTool(input: unknown, run: PipelineRunner): Promise<RunPipelineResult> {
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const parsed = runPipelineInputSchema.safeParse({ campaign: raw.campaign })
+  if (!parsed.success) return { ok: false, message: "Ungültige Eingabe: Kampagnenschlüssel prüfen." }
+  try {
+    const result = await run(parsed.data.campaign)
+    return result.ran
+      ? { ok: true, data: { started: true, status: "completed" } }
+      : { ok: true, data: { started: false, status: "already_running" } }
+  } catch {
+    return { ok: false, message: "Der Pipeline-Lauf ist fehlgeschlagen (Kampagne unbekannt oder Konfiguration unvollständig)." }
+  }
+}

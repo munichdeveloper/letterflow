@@ -11,7 +11,7 @@ App für die B2B-Briefakquise: Kampagnen anlegen, Leads durch die Kette verfolge
 Die Daten liegen im Schema `acq` der Business-OS-Datenbank (Supabase). Jeder Lead hat einen Zustand; ändern
 darf ihn nur die Datenbankfunktion `acq.transition`. Sie prüft erlaubte Übergänge, bindet Freigaben an einen
 Menschen (`human:<name>`), an die Revision des Seitentextes bzw. den Hash des Brief-PDFs und verlangt vor jeder
-Brieffreigabe eine dokumentierte Interessenabwägung der Kampagne.
+Brieffreigabe, dass die neueste Interessenabwägung der Kampagne freigegeben ist (Regel 7, siehe „Interessenabwägung“).
 
 ```
 discovered → checked → approved → researched → page_ready → page_approved → letter_ready → letter_approved → queued → sent
@@ -28,6 +28,7 @@ discovered → checked → approved → researched → page_ready → page_appro
 | Systeme, Einstellungen, Verbindungstests | `src/lib/integrations.ts` |
 | Brief-PDF bauen (pdfkit, QR-Code) | `src/lib/chain/letter-pdf.ts` |
 | Brief-PDFs speichern und lesen (`acq.letter_pdfs`) | `src/lib/server/letter-pdfs.ts` |
+| Interessenabwägung prüfen, speichern, freigeben (`acq.interest_balancings`) | `src/lib/interest-balancing.ts`, `src/lib/server/interest-balancings.ts` |
 | Schema `acq` (Kern) | business-os `supabase/migrations/20261120110000_acq_pipeline_core.sql` |
 | Schema-Erweiterungen von letterflow | `supabase/migrations/` |
 
@@ -69,11 +70,23 @@ Die übrigen Einstellungen (Directus-URL, Collection, Website-URL, Pingen-Organi
 ## Einrichten
 
 1. Migrationen aus `supabase/migrations/` der Reihe nach in der Business-OS-Datenbank einspielen
-   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`, `20261120170000_acq_chain_runs.sql`).
+   (`20261120150000_acq_integrations.sql`, `20261120160000_acq_letter_pdfs.sql`, `20261120170000_acq_chain_runs.sql`,
+   `20261121100000_acq_interest_balancings.sql`).
 2. `.env.example` nach `.env.local` kopieren und ausfüllen. Passwort-Hash je Person: `npm run user:hash -- <name>`.
 3. `npm install`, dann `npm run dev`.
 
-Prüfen: `npm test`, `npm run typecheck`, `npm run build`.
+Prüfen: `npm test`, `npm run typecheck`, `npm run build`. Die Datenbank-Tests (`tests/interest-balancing-db.test.ts`)
+starten ein Wegwerf-Postgres über `initdb`/`pg_ctl` (oder nutzen `ACQ_TEST_DATABASE_URL`) und laufen gegen ein
+Testgerüst des Kerns; ohne Postgres werden sie übersprungen.
+
+## Interessenabwägung
+
+Auf **Bearbeiten** einer Kampagne lädt man die Abwägung (Art. 6 Abs. 1 lit. f DSGVO) als `.md` oder PDF hoch, höchstens
+2 MB. Jede Datei wird eine neue Version in `acq.interest_balancings`; gespeicherte Dateien ändern sich nie. **Abwägung
+freigeben** ruft `acq.approve_interest_balancing` mit dem angemeldeten Menschen auf; die Datenbank nimmt nur `human:<name>`,
+den angezeigten SHA-256 und die neueste Version an. Eine Brieffreigabe geht nur, solange die neueste Version freigegeben
+ist; das Ereignis hält `id`, `version` und `sha256` der Abwägung fest. Das alte Freitextfeld `interest_balancing_ref` zählt
+nicht mehr und wird in der App nicht mehr bearbeitet.
 
 ## Angebundene Systeme
 
@@ -91,6 +104,69 @@ Jeder Test liest nur, legt nichts an und versendet nichts.
 
 Login je Person, weil jede Freigabe einem Menschen zugeordnet wird. Nutzer stehen in `LETTERFLOW_USERS`
 (`name:scrypt:<salt>:<hash>`, mehrere mit Komma), die Sitzung ist ein signiertes Cookie (`LETTERFLOW_SESSION_SECRET`).
+
+## MCP-Endpunkt
+
+`/api/mcp` ist ein geschützter MCP-Server (Streamable HTTP, zustandslos, Node-Runtime, offizielles
+`@modelcontextprotocol/sdk`). Er bietet fünf Tools (zwei lesend, drei schreibend bzw. startend):
+
+- `letterflow_list_campaigns` – Eingabe `{status?: "active"|"paused"|"closed", limit?: 1–100}`; Ausgabe je Kampagne
+  nur `key`, `title`, `offer`, `segment`, `status`, `counts` (kein Brieftext, keine Interessenabwägung).
+- `letterflow_get_status` – Eingabe `{campaign: string, domain?: string, limit?: 1–100 (Standard 50)}`; Ausgabe je Lead
+  nur `company`, `domain`, `state`, `state_reason`, `latest_revision`, `approved_revision`, `evidence_count`,
+  `letter_status`, `updated_at` (bei `domain` zusätzlich `requires_human_approval`). Keine Anschriften, Texte,
+  PDF-Hashes oder Schlüssel; unbekannte Kampagne/Domain ergibt eine kontrollierte Fehlermeldung.
+- `letterflow_import_leads` – 1–50 recherchierte Leads mit Quellenbelegen importieren (Zustand `checked`, `rejected`
+  oder `suppressed`); gibt nichts frei.
+- `letterflow_import_proposals` – 1–50 Landingpage-/Briefvorschläge für bereits freigegebene Leads importieren.
+- `letterflow_run_pipeline` – Eingabe `{campaign: string}`; startet ausdrücklich die bestehende Kette (`runChain`).
+  Antwort nur `{started, status}` (`completed` oder `already_running`); Fehler ohne Details. Die kampagnenbezogene
+  Laufsperre bleibt maßgeblich: Bei aktivem Lauf wird kein zweiter gestartet. Das Tool gibt nichts frei, verarbeitet
+  nur bereits freigegebene Schritte, behält JEV-Grenze, PDF-Hash-Prüfung und Outbox-Idempotenz bei und sendet nur über
+  **Pingen Staging** (kein echter Postversand). Kein Verbinden, Auflisten, Statuslesen oder Importieren startet einen Lauf.
+
+**Ablauf mit den fünf Tools:** Kampagnen (`letterflow_list_campaigns`) → Lead-Import (`letterflow_import_leads`) →
+menschliche Freigabe der Leads in der Web-App (`approved`) → Vorschlagsimport (`letterflow_import_proposals`) →
+menschliche Seiten- und Brieffreigaben in der Web-App (`page_approved`, `letter_approved`) → expliziter Lauf
+(`letterflow_run_pipeline`); Fortschritt jeweils mit `letterflow_get_status`. Freigaben gibt es ausschließlich in der
+authentifizierten Web-App, nie per MCP.
+
+Jeder Request braucht `Authorization: Bearer <token>`; Web-Cookies gelten nicht. Ohne gültiges Token oder bei
+fehlender bzw. ungültiger Konfiguration antwortet der Endpunkt mit 401 bzw. 503, ohne die Datenbank anzufassen.
+Es gibt nur `POST` (kein Server-Stream, keine Sitzungen); Anfragen sind auf 64 KB begrenzt.
+Das Audit-Log (`console.info`, JSON) enthält nur Zeit, Client-ID, Tool, Ergebnis und Dauer.
+
+**Secret `LETTERFLOW_MCP_CLIENTS`:** JSON-Objekt `clientId -> token`.
+
+```
+LETTERFLOW_MCP_CLIENTS='{"agent-eins":"<token>","agent-zwei":"<token>"}'
+```
+
+- Client-ID: `^[a-z][a-z0-9-]{1,30}$`. Token: mindestens 32 zufällige Bytes, z. B. `openssl rand -hex 32`
+  (zu kurze oder gleichförmige Token, doppelte Token und kaputtes JSON machen die ganze Konfiguration ungültig;
+  der Endpunkt bleibt dann geschlossen).
+- **Tokenrotation:** neuen Eintrag mit neuem Token ergänzen, Secret setzen und neu starten, den Client umstellen,
+  danach den alten Eintrag entfernen. Jeder Client hat ein eigenes, unabhängig rotierbares Token.
+
+Beispielaufruf mit dem MCP-Client des SDK (Tools entdecken und aufrufen):
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+
+const client = new Client({ name: "beispiel", version: "1.0.0" })
+await client.connect(new StreamableHTTPClientTransport(new URL("https://<host>/api/mcp"), {
+  requestInit: { headers: { Authorization: `Bearer ${process.env.LETTERFLOW_MCP_TOKEN}` } },
+}))
+console.log((await client.listTools()).tools.map((t) => t.name))
+console.log(await client.callTool({ name: "letterflow_list_campaigns", arguments: { status: "active", limit: 10 } }))
+// Nach den menschlichen Freigaben, mit synthetischem Kampagnenschlüssel:
+console.log(await client.callTool({ name: "letterflow_run_pipeline", arguments: { campaign: "beispiel-kampagne" } }))
+// -> { started: true, status: "completed" } oder { started: false, status: "already_running" }
+```
+
+`tests/mcp.test.ts` prüft Handshake, Tool-Aufruf und Authentifizierung mit genau diesem SDK-Client gegen den
+Handler. Andere Clients (z. B. ChatGPT) sind nicht getestet. Der Endpunkt gehört hinter HTTPS (Coolify/Proxy).
 
 ## Betrieb
 

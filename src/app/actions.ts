@@ -11,8 +11,10 @@ import { sqlAcqStore } from "@/lib/acq/store"
 import { actorFor, canReject, canResume, STAGE_FOR_STATE } from "@/lib/approvals"
 import { campaignFromForm } from "@/lib/campaigns"
 import { INTEGRATION_KEYS, parseIntegrationConfig, testIntegration, type IntegrationKey } from "@/lib/integrations"
+import { interestBalancingFromForm } from "@/lib/interest-balancing"
 import { runChain } from "@/lib/server/chain"
 import { db } from "@/lib/server/db"
+import { approveInterestBalancing, saveInterestBalancing } from "@/lib/server/interest-balancings"
 import { createCampaign, getIntegration, leadDetail, recordIntegrationTest, saveIntegration, updateCampaign } from "@/lib/server/queries"
 import { requireUser } from "@/lib/server/session"
 
@@ -21,9 +23,11 @@ export type FormState = { error?: string; ok?: string }
 function message(error: unknown) {
   if (error instanceof ZodError) return error.issues.map((i) => `${i.path.join(".") || "Eingabe"}: ${i.message}`).join(" · ")
   const text = error instanceof Error ? error.message : String(error)
-  // Meldungen von acq.transition verständlich machen
-  if (/interest balancing/.test(text)) return "Für diese Kampagne fehlt die dokumentierte Interessenabwägung. Erst eintragen, dann den Brief freigeben."
-  if (/needs a human approval/.test(text)) return "Diese Freigabe braucht einen Menschen."
+  // Meldungen von acq.transition und acq.approve_interest_balancing verständlich machen
+  if (/needs a human/.test(text)) return "Diese Freigabe braucht einen Menschen."
+  if (/interest balancing hash mismatch/.test(text)) return "Die Interessenabwägung hat sich geändert. Bitte die Seite neu laden."
+  if (/not the latest interest balancing/.test(text)) return "Es gibt eine neuere Version der Interessenabwägung. Bitte die Seite neu laden."
+  if (/interest balancing/.test(text)) return "Die neueste Interessenabwägung dieser Kampagne ist nicht freigegeben. Erst hochladen und freigeben (Kampagne bearbeiten), dann den Brief freigeben."
   if (/not allowed/.test(text)) return `Dieser Schritt ist im aktuellen Zustand nicht erlaubt (${text}).`
   return text
 }
@@ -59,6 +63,41 @@ export async function saveCampaign(_: FormState, form: FormData): Promise<FormSt
   }
   revalidatePath("/")
   redirect(`/campaigns/${key}`)
+}
+
+function revalidateCampaign(campaign: string) {
+  revalidatePath("/")
+  revalidatePath(`/campaigns/${campaign}`)
+  revalidatePath(`/campaigns/${campaign}/edit`)
+}
+
+/** Interessenabwägung (.md oder .pdf, höchstens 2 MB) als neue Version speichern. Bis zur Freigabe keine Brieffreigabe. */
+export async function uploadInterestBalancing(_: FormState, form: FormData): Promise<FormState> {
+  const user = await requireUser()
+  const campaign = String(form.get("campaign") ?? "").trim()
+  try {
+    if (!campaign) throw new Error("Kampagne fehlt.")
+    const file = await interestBalancingFromForm(form)
+    const saved = await saveInterestBalancing(campaign, file, actorFor(user.name))
+    revalidateCampaign(campaign)
+    return { ok: `Version ${saved.version} gespeichert. Bitte prüfen und freigeben; bis dahin ist keine Brieffreigabe möglich.` }
+  } catch (error) {
+    return { error: message(error) }
+  }
+}
+
+/** Digitale Freigabe der neuesten Version durch den angemeldeten Menschen, gebunden an den angezeigten SHA-256. */
+export async function approveInterestBalancingVersion(_: FormState, form: FormData): Promise<FormState> {
+  const user = await requireUser()
+  const text = (name: string) => String(form.get(name) ?? "").trim()
+  const campaign = text("campaign")
+  try {
+    const row = await approveInterestBalancing(campaign, text("id"), text("sha256"), actorFor(user.name))
+    revalidateCampaign(campaign)
+    return { ok: `Interessenabwägung v${row.version} freigegeben.` }
+  } catch (error) {
+    return { error: message(error) }
+  }
 }
 
 function integrationKey(form: FormData): IntegrationKey {

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { ChainButton } from "@/components/forms"
 import { Shell } from "@/components/shell"
 import { STATE_LABELS, WAITING_FOR_HUMAN } from "@/lib/campaigns"
+import { interestBalancingLabel, isInterestBalancingApproved } from "@/lib/interest-balancing"
 import { campaignLeads, getCampaign } from "@/lib/server/queries"
 import { requireUser } from "@/lib/server/session"
 
@@ -14,6 +15,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ key: 
   const campaign = await getCampaign(key)
   if (!campaign) notFound()
   const leads = await campaignLeads(key)
+  const balancing = campaign.interest_balancing
   return (
     <Shell user={user.name}>
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -22,9 +24,12 @@ export default async function CampaignPage({ params }: { params: Promise<{ key: 
       </div>
       <p className="muted">{campaign.key} · Angebot {campaign.offer} · {campaign.status}</p>
       <p>{campaign.segment}</p>
-      {campaign.interest_balancing_ref
-        ? <p>Interessenabwägung: {campaign.interest_balancing_ref}</p>
-        : <p className="bad">Interessenabwägung fehlt: Briefe dieser Kampagne können nicht freigegeben werden.</p>}
+      <p className={isInterestBalancingApproved(balancing) ? undefined : "bad"}>
+        {interestBalancingLabel(balancing)}
+        {!isInterestBalancingApproved(balancing) && ": Briefe dieser Kampagne können nicht freigegeben werden"}
+        {balancing && <> · <a href={`/campaigns/${key}/interest-balancing/${balancing.version}`} target="_blank" rel="noreferrer">ansehen</a></>}
+        {" · "}<Link href={`/campaigns/${key}/edit`}>{isInterestBalancingApproved(balancing) ? "neue Version hochladen" : balancing ? "freigeben oder neue Version" : "hochladen"}</Link>
+      </p>
       <h2>Kette</h2>
       <p className="muted">Treibt jeden Lead so weit, wie es ohne Mensch geht: Seiten anlegen, Briefe bauen, freigegebene Briefe prüfen und zu Pingen (Staging) laden.</p>
       <ChainButton campaign={campaign.key} />
